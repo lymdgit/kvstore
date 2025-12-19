@@ -136,7 +136,21 @@ make clean
 
 示例输出：
 
-![4bf64554bc7288aa0ecb22fccbd98a2a](D:\微信\聊天记录\xwechat_files\wxid_sym4igxd38vz22_abde\temp\RWTemp\2025-12\9e20f478899dc29eb19741386f9343c8\4bf64554bc7288aa0ecb22fccbd98a2a.png)
+```
+book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 1
+array testcase--> time_used: 37884, qps: 15837
+book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 2
+rbtree testcase-->  time_used: 13397, qps: 14928
+book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 4
+hash testcase-->  time_used: 12857, qps: 15555
+book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 8
+skiptable testcase-->  time_used: 13183, qps: 15171
+book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 16
+btree testcase-->  time_used: 13083, qps: 15287
+
+```
+
+
 
 ## 项目结构
 
