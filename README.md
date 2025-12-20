@@ -137,16 +137,16 @@ make clean
 示例输出：
 
 ```
-book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 1
-array testcase--> time_used: 37884, qps: 15837
-book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 2
-rbtree testcase-->  time_used: 13397, qps: 14928
-book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 4
-hash testcase-->  time_used: 12857, qps: 15555
-book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 8
-skiptable testcase-->  time_used: 13183, qps: 15171
-book@100ask:~/Desktop/0voice/9.1.1-kvstore-main$ ./testcase -s 192.168.23.128 -p 9096 -m 16
-btree testcase-->  time_used: 13083, qps: 15287
+book@100ask:~/Desktop/0voice/github/kvstore$ ./testcase -s 192.168.72.145 -p 9096 -m 1
+array testcase--> time_used: 21366, qps: 28081
+book@100ask:~/Desktop/0voice/github/kvstore$ ./testcase -s 192.168.72.145 -p 9096 -m 2
+rbtree testcase-->  time_used: 7095, qps: 28188
+book@100ask:~/Desktop/0voice/github/kvstore$ ./testcase -s 192.168.72.145 -p 9096 -m 4
+hash testcase-->  time_used: 7068, qps: 28296
+book@100ask:~/Desktop/0voice/github/kvstore$ ./testcase -s 192.168.72.145 -p 9096 -m 8
+skiptable testcase-->  time_used: 7031, qps: 28445
+book@100ask:~/Desktop/0voice/github/kvstore$ ./testcase -s 192.168.72.145 -p 9096 -m 16
+btree testcase-->  time_used: 7106, qps: 28145
 
 ```
 
