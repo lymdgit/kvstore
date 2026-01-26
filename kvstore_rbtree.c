@@ -408,7 +408,7 @@ void kvstore_rbtree_destory(rbtree *tree) {
 
 		node = rbtree_delete(tree, node);
 
-		if (!node) {
+		if (node) {
 			kvstore_free(node->key);
 			kvstore_free(node->value);
 			kvstore_free(node);
@@ -443,8 +443,16 @@ int kvs_rbtree_set(rbtree *tree, char *key, char *value) {
 	memset(node->value, 0, strlen(value) + 1);
 	strcpy((char *)node->value, value);
 
+	int old_count = tree->count;
 	rbtree_insert(tree, node);
-	tree->count ++;
+	// Only increment count if node was actually inserted (insert returns early if key exists)
+	if (tree->root != tree->nil) {
+		// Check if count should be incremented by verifying insertion happened
+		rbtree_node *found = rbtree_search(tree, key);
+		if (found != tree->nil && found == node) {
+			tree->count ++;
+		}
+	}
 
 	return 0;
 }
@@ -470,7 +478,7 @@ int kvs_rbtree_delete(rbtree *tree, char *key) {
 	
 	rbtree_node *cur = rbtree_delete(tree, node);
 
-	if (!cur) {
+	if (cur) {
 		kvstore_free(cur->key);
 		kvstore_free(cur->value);
 		kvstore_free(cur);

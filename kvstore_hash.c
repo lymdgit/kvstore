@@ -108,6 +108,7 @@ int init_hashtable(hashtable_t *hash) {
 
 	hash->nodes = (hashnode_t**)kvstore_malloc(sizeof(hashnode_t*) * MAX_TABLE_SIZE);
 	if (!hash->nodes) return -1;
+	memset(hash->nodes, 0, sizeof(hashnode_t*) * MAX_TABLE_SIZE);
 
 	hash->max_slots = MAX_TABLE_SIZE;
 	hash->count = 0; 
