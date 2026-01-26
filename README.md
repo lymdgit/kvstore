@@ -398,6 +398,9 @@ void server_reader(void *arg) {
 *   **测试条件**: 50 并发连接, 100万请求, Pipeline机制
 *   **硬件环境**: Linux Server (epoll/io_uring supported)
 
+![Benchmark rbtree](https://disk.0voice.com/p/2c)
+![Benchmark io_uring](https://disk.0voice.com/p/2d)
+
 ### 核心数据 (QPS)
 
 | 网络模型 | 数据结构 | SET QPS | GET QPS | 相对 Redis 提升 |
