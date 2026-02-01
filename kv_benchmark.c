@@ -33,18 +33,29 @@
 #define DEFAULT_REQUESTS 100000
 #define DEFAULT_PIPELINE 1
 
+// Histogram configuration
+// 0-200ms range with 10us resolution
+// Bucket 0: 0-9us
+// Bucket 1: 10-19us
+// ...
+// Bucket 20000: >= 200000us (200ms)
+#define HISTOGRAM_BUCKETS 20001
+#define HISTOGRAM_RESOLUTION_US 10
+
 // 存储类型
 typedef enum {
   STORE_RBTREE = 0, // 红黑树 (RSET/RGET) - 默认
   STORE_HASH,       // 哈希表 (HSET/HGET)
   STORE_SKIP,       // 跳表 (SSET/SGET)
-  STORE_BTREE       // B树 (BSET/BGET)
+  STORE_BTREE,      // B树 (BSET/BGET)
+  STORE_PERSIST     // 持久化 (PSET/PGET)
 } store_type_t;
 
 // 存储类型名称
-static const char *store_names[] = {"RBTree", "Hash", "SkipTable", "BTree"};
-static const char *store_set_cmds[] = {"RSET", "HSET", "SSET", "BSET"};
-static const char *store_get_cmds[] = {"RGET", "HGET", "SGET", "BGET"};
+static const char *store_names[] = {"RBTree", "Hash", "SkipTable", "BTree",
+                                    "Persist"};
+static const char *store_set_cmds[] = {"RSET", "HSET", "SSET", "BSET", "PSET"};
+static const char *store_get_cmds[] = {"RGET", "HGET", "SGET", "BGET", "PGET"};
 
 // ===================== Global State =====================
 
@@ -63,11 +74,12 @@ typedef enum { CMD_SET = 0, CMD_GET = 1 } cmd_type_t;
 typedef struct {
   int thread_id;
   benchmark_config_t *config;
-  cmd_type_t cmd_type;      // 命令类型
-  long requests_to_send;    // 该线程需要发送的请求数
-  long requests_completed;  // 该线程完成的请求数
-  long long latency_sum_us; // 延迟总和(微秒)
-  int errors;               // 错误计数
+  cmd_type_t cmd_type;               // 命令类型
+  long requests_to_send;             // 该线程需要发送的请求数
+  long requests_completed;           // 该线程完成的请求数
+  long long latency_sum_us;          // 延迟总和(微秒)
+  int errors;                        // 错误计数
+  long histogram[HISTOGRAM_BUCKETS]; // Latency histogram
 } thread_context_t;
 
 // 全局原子计数器，用于精确统计
@@ -160,6 +172,9 @@ void *benchmark_worker(void *arg) {
   thread_context_t *ctx = (thread_context_t *)arg;
   benchmark_config_t *config = ctx->config;
 
+  // Initialize histogram
+  memset(ctx->histogram, 0, sizeof(ctx->histogram));
+
   // 创建连接
   int sockfd = connect_to_server(config->host, config->port);
   if (sockfd < 0) {
@@ -234,7 +249,19 @@ void *benchmark_worker(void *arg) {
     int completed = (recv_count > 0) ? recv_count : batch_size;
     requests_sent += batch_size;
     requests_completed += completed;
-    latency_sum += (end_us - start_us);
+
+    // Average pipeline latency per request for histogram?
+    // Usually benchmark tools count per-pipeline-batch latency or average.
+    // Redis-benchmark measures round-trip of the pipeline batch.
+    long long batch_latency = end_us - start_us;
+    latency_sum += batch_latency;
+
+    // Record in histogram (batch latency)
+    int bucket = batch_latency / HISTOGRAM_RESOLUTION_US;
+    if (bucket >= HISTOGRAM_BUCKETS) {
+      bucket = HISTOGRAM_BUCKETS - 1;
+    }
+    ctx->histogram[bucket]++;
 
     // 原子更新全局计数
     atomic_fetch_add(&g_completed_requests, completed);
@@ -260,7 +287,28 @@ typedef struct {
   double elapsed_sec;
   double qps;
   double avg_latency_ms;
+  double p50_ms;
+  double p99_ms;
+  double p999_ms;
 } benchmark_result_t;
+
+// Calculate percentile from histogram
+static double calculate_percentile(long *histogram, long total_samples,
+                                   double percentile) {
+  long threshold = (long)(total_samples * percentile / 100.0);
+  long count_so_far = 0;
+
+  for (int i = 0; i < HISTOGRAM_BUCKETS; i++) {
+    count_so_far += histogram[i];
+    if (count_so_far >= threshold) {
+      // Bucket center value in ms
+      return (i * HISTOGRAM_RESOLUTION_US + HISTOGRAM_RESOLUTION_US / 2.0) /
+             1000.0;
+    }
+  }
+  // Max value (200ms+)
+  return (HISTOGRAM_BUCKETS * HISTOGRAM_RESOLUTION_US) / 1000.0;
+}
 
 void run_benchmark(benchmark_config_t *config, const char *test_name,
                    cmd_type_t cmd_type, benchmark_result_t *result) {
@@ -270,15 +318,18 @@ void run_benchmark(benchmark_config_t *config, const char *test_name,
   // 分配线程和上下文
   pthread_t *threads = malloc(sizeof(pthread_t) * num_clients);
   thread_context_t *contexts = malloc(sizeof(thread_context_t) * num_clients);
+  long *global_histogram = malloc(sizeof(long) * HISTOGRAM_BUCKETS);
 
-  if (!threads || !contexts) {
+  if (!threads || !contexts || !global_histogram) {
     perror("malloc");
     free(threads);
     free(contexts);
+    free(global_histogram);
     result->completed = 0;
     result->qps = 0;
     return;
   }
+  memset(global_histogram, 0, sizeof(long) * HISTOGRAM_BUCKETS);
 
   // 重置全局计数器
   atomic_store(&g_completed_requests, 0);
@@ -324,9 +375,22 @@ void run_benchmark(benchmark_config_t *config, const char *test_name,
   long total_completed = atomic_load(&g_completed_requests);
   long total_errors = atomic_load(&g_total_errors);
   long long total_latency = 0;
+  long total_samples = 0;
 
   for (int i = 0; i < num_clients; i++) {
     total_latency += contexts[i].latency_sum_us;
+
+    // Merge histograms
+    for (int j = 0; j < HISTOGRAM_BUCKETS; j++) {
+      global_histogram[j] += contexts[i].histogram[j];
+    }
+
+    // Count total batches sent (samples)
+    // Note: total_completed is requests, but latency is per batch/pipeline
+    long batches =
+        (contexts[i].requests_completed + config->pipeline_size - 1) /
+        config->pipeline_size;
+    total_samples += batches;
   }
 
   // 计算精确的时间差(秒)
@@ -341,17 +405,13 @@ void run_benchmark(benchmark_config_t *config, const char *test_name,
   double qps = (double)total_completed / elapsed_sec;
 
   // 计算平均延迟(毫秒)
-  // 注意：total_latency是所有线程的延迟总和，每个延迟对应一批请求
-  // 这里计算的是每批请求的平均延迟
-  long batches = 0;
-  for (int i = 0; i < num_clients; i++) {
-    if (contexts[i].requests_completed > 0) {
-      batches += (contexts[i].requests_completed + config->pipeline_size - 1) /
-                 config->pipeline_size;
-    }
-  }
   double avg_latency_ms =
-      (batches > 0) ? (double)total_latency / batches / 1000.0 : 0;
+      (total_samples > 0) ? (double)total_latency / total_samples / 1000.0 : 0;
+
+  // Calculate percentiles
+  double p50 = calculate_percentile(global_histogram, total_samples, 50.0);
+  double p99 = calculate_percentile(global_histogram, total_samples, 99.0);
+  double p999 = calculate_percentile(global_histogram, total_samples, 99.9);
 
   // 填充结果
   result->completed = total_completed;
@@ -359,10 +419,14 @@ void run_benchmark(benchmark_config_t *config, const char *test_name,
   result->elapsed_sec = elapsed_sec;
   result->qps = qps;
   result->avg_latency_ms = avg_latency_ms;
+  result->p50_ms = p50;
+  result->p99_ms = p99;
+  result->p999_ms = p999;
 
   // 释放资源
   free(threads);
   free(contexts);
+  free(global_histogram);
 }
 
 // ===================== Output Formatting =====================
@@ -377,8 +441,11 @@ void print_result(const char *test_name, benchmark_config_t *config,
   printf("  Pipeline: %d\n", config->pipeline_size);
   printf("\n");
   printf("  Throughput: %.2f requests/second\n", result->qps);
-  printf("  Avg Latency: %.3f ms (per pipeline batch)\n",
-         result->avg_latency_ms);
+  printf("  Avg Latency: %.3f ms\n", result->avg_latency_ms);
+  printf("  p50 Latency: %.3f ms\n", result->p50_ms);
+  printf("  p99 Latency: %.3f ms\n", result->p99_ms);
+  printf("  p99.9 Latency: %.3f ms\n", result->p999_ms);
+
   if (result->errors > 0) {
     printf("  Errors: %ld\n", result->errors);
   }
@@ -397,7 +464,8 @@ void print_usage(const char *prog) {
          DEFAULT_REQUESTS);
   printf("  -P <pipeline>   Pipeline requests (default: %d)\n",
          DEFAULT_PIPELINE);
-  printf("  -t <type>       Storage type: rbtree, hash, skip, btree (default: "
+  printf("  -t <type>       Storage type: rbtree, hash, skip, btree, persist "
+         "(default: "
          "rbtree)\n");
   printf("  -?              Show this help message\n");
   printf("\n");
@@ -453,9 +521,11 @@ int main(int argc, char *argv[]) {
         config.store_type = STORE_SKIP;
       } else if (strcmp(optarg, "btree") == 0 || strcmp(optarg, "b") == 0) {
         config.store_type = STORE_BTREE;
+      } else if (strcmp(optarg, "persist") == 0 || strcmp(optarg, "p") == 0) {
+        config.store_type = STORE_PERSIST;
       } else {
         fprintf(stderr, "Unknown storage type: %s\n", optarg);
-        fprintf(stderr, "Valid types: rbtree, hash, skip, btree\n");
+        fprintf(stderr, "Valid types: rbtree, hash, skip, btree, persist\n");
         return 1;
       }
       break;
@@ -489,17 +559,21 @@ int main(int argc, char *argv[]) {
   run_benchmark(&config, "GET", CMD_GET, &get_result);
   print_result("GET", &config, &get_result);
 
-  // 总结
+  // 总结(Updated table format)
   printf("==================\n");
   printf("Benchmark Complete\n");
   printf("==================\n");
   printf("\n");
-  printf("%-10s %12s %12s %12s\n", "Test", "Requests", "Time(s)", "QPS");
-  printf("---------- ------------ ------------ ------------\n");
-  printf("%-10s %12ld %12.2f %12.2f\n", "SET", set_result.completed,
-         set_result.elapsed_sec, set_result.qps);
-  printf("%-10s %12ld %12.2f %12.2f\n", "GET", get_result.completed,
-         get_result.elapsed_sec, get_result.qps);
+  printf("%-10s %12s %12s %12s %12s %12s\n", "Test", "Requests", "Time(s)",
+         "QPS", "p50(ms)", "p99(ms)");
+  printf("---------- ------------ ------------ ------------ ------------ "
+         "------------\n");
+  printf("%-10s %12ld %12.2f %12.2f %12.3f %12.3f\n", "SET",
+         set_result.completed, set_result.elapsed_sec, set_result.qps,
+         set_result.p50_ms, set_result.p99_ms);
+  printf("%-10s %12ld %12.2f %12.2f %12.3f %12.3f\n", "GET",
+         get_result.completed, get_result.elapsed_sec, get_result.qps,
+         get_result.p50_ms, get_result.p99_ms);
   printf("\n");
 
   return 0;

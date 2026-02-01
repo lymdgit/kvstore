@@ -1,365 +1,270 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KVStore 高并发性能基准测试</title>
+    <title>KVStore 性能基准测试报告</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
-        :root {
-            --bg-color: #0f172a;
-            --card-bg: rgba(30, 41, 59, 0.7);
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --accent-color: #38bdf8;
-            --success-color: #4ade80;
-            --danger-color: #f87171;
-            --epoll-color: #a78bfa;
-            --ntyco-color: #34d399;
-            --iouring-color: #38bdf8;
-        }
-
         body {
-            font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            margin: 0;
-            padding: 0;
-            line-height: 1.6;
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.1) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(139, 92, 246, 0.1) 0px, transparent 50%);
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 20px;
-        }
-
-        header {
-            text-align: center;
-            margin-bottom: 50px;
-        }
-
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 15px;
-            letter-spacing: -1px;
-        }
-
-        .subtitle {
-            color: var(--text-secondary);
-            font-size: 1.1rem;
-            font-weight: 300;
-            max-width: 800px;
-            margin: 0 auto;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 30px;
-            margin-bottom: 40px;
-        }
-
-        @media (min-width: 768px) {
-            .grid {
-                grid-template-columns: 1fr 1fr;
-            }
-            .grid-full {
-                grid-column: span 2;
-            }
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: 'Inter', system-ui, sans-serif;
         }
 
         .card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            padding: 25px;
+            background-color: #1e293b;
+            border-radius: 1rem;
+            border: 1px solid #334155;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease;
         }
 
-        .card:hover {
-            transform: translateY(-5px);
-            border-color: rgba(56, 189, 248, 0.3);
+        .text-cyan {
+            color: #22d3ee;
         }
 
-        h2 {
-            font-size: 1.25rem;
-            margin-top: 0;
-            margin-bottom: 20px;
-            color: var(--text-primary);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        h2::before {
-            content: '';
-            display: block;
-            width: 4px;
-            height: 18px;
-            background-color: var(--accent-color);
-            border-radius: 2px;
+        .text-purple {
+            color: #a78bfa;
         }
 
-        .chart-container {
-            position: relative;
-            height: 320px;
-            width: 100%;
+        .text-green {
+            color: #34d399;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-            font-size: 0.9rem;
+        .text-pink {
+            color: #f472b6;
         }
 
-        th, td {
-            text-align: right;
-            padding: 12px 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        
-        th:first-child, td:first-child {
-            text-align: left;
+        .text-orange {
+            color: #fb923c;
         }
 
-        th {
-            color: var(--text-secondary);
-            font-weight: 600;
-            font-size: 0.8rem;
-            text-transform: uppercase;
+        .gradient-text {
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            color: transparent;
         }
-
-        tr:hover td {
-            background-color: rgba(255,255,255,0.02);
-        }
-
-        .highlight-box {
-            display: flex;
-            gap: 15px;
-            margin-top: 20px;
-        }
-
-        .stat {
-            flex: 1;
-            background: rgba(0, 0, 0, 0.2);
-            padding: 15px;
-            border-radius: 10px;
-            text-align: center;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .stat-label {
-            display: block;
-            font-size: 0.75rem;
-            color: var(--text-secondary);
-            margin-bottom: 5px;
-        }
-
-        .stat-value {
-            display: block;
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--text-primary);
-        }
-
-        footer {
-            text-align: center;
-            margin-top: 60px;
-            color: var(--text-secondary);
-            font-size: 0.85rem;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        
-        .tag {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-        }
-        
-        .tag-io { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
-        .tag-redis { background: rgba(244, 114, 182, 0.15); color: #f472b6; }
     </style>
 </head>
-<body>
 
-<div class="container">
-    <header>
-        <h1>KVStore 性能基准测试报告</h1>
-        <div class="subtitle">
-            高并发场景下 (50 Clients, 100w Requests, Pipeline=16) 
-            <br>
-            KVStore (io_uring/epoll/NtyCo) 与 Redis 的性能对比
-        </div>
+<body class="p-6 md:p-10 min-h-screen">
+
+    <!-- Header -->
+    <header class="text-center mb-10">
+        <h1 class="text-3xl md:text-5xl font-bold mb-3 gradient-text">KVStore 性能基准测试报告</h1>
+        <p class="text-slate-400">核心指标双重奏：吞吐量 (QPS) 与 延迟响应 (Latency)</p>
     </header>
 
-    <div class="grid">
-        <!-- Redis 对比 -->
-        <div class="card grid-full">
-            <h2>🏆 巅峰对决: KVStore vs Redis</h2>
-            <div class="chart-container">
-                <canvas id="redisComparisonChart"></canvas>
-            </div>
-            <div class="highlight-box">
-                <div class="stat">
-                    <span class="stat-label">KVStore (io_uring) 峰值</span>
-                    <span class="stat-value" style="color: var(--iouring-color)">36.1w QPS</span>
+    <!-- Key Metrics Summary (Moved to Top) -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <!-- Card 1: io_uring -->
+            <div class="card p-5 border-t-4 border-t-cyan-400 relative overflow-hidden group">
+                <div class="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition text-6xl">🚀</div>
+                <h3 class="text-slate-400 text-sm font-bold uppercase tracking-wider mb-2">KVStore (io_uring)</h3>
+                <div class="mb-4">
+                    <div class="text-xs text-slate-500">GET QPS</div>
+                    <div class="text-3xl font-bold text-white">31.4w</div>
                 </div>
-                <div class="stat">
-                    <span class="stat-label">KVStore (epoll) 峰值</span>
-                    <span class="stat-value" style="color: var(--epoll-color)">29.6w QPS</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">Redis (Pipeline=16)</span>
-                    <span class="stat-value" style="color: #f472b6">9.3w QPS</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">性能倍数</span>
-                    <span class="stat-value" style="color: var(--success-color)">3.8x</span>
+                <div>
+                    <div class="text-xs text-slate-500">P50 Latency</div>
+                    <div class="text-2xl font-bold text-cyan">2.53 ms</div>
                 </div>
             </div>
+
+            <!-- Card 2: Epoll -->
+            <div class="card p-5 border-t-4 border-t-purple-400 relative overflow-hidden">
+                <h3 class="text-slate-400 text-sm font-bold uppercase tracking-wider mb-2">KVStore (Epoll)</h3>
+                <div class="mb-4">
+                    <div class="text-xs text-slate-500">GET QPS</div>
+                    <div class="text-3xl font-bold text-white">25.8w</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500">P50 Latency</div>
+                    <div class="text-2xl font-bold text-purple">3.00 ms</div>
+                </div>
+            </div>
+
+            <!-- Card 3: NtyCo -->
+            <div class="card p-5 border-t-4 border-t-green-400 relative overflow-hidden">
+                <h3 class="text-slate-400 text-sm font-bold uppercase tracking-wider mb-2">KVStore (NtyCo)</h3>
+                <div class="mb-4">
+                    <div class="text-xs text-slate-500">GET QPS</div>
+                    <div class="text-3xl font-bold text-white">21.2w</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500">P50 Latency</div>
+                    <div class="text-2xl font-bold text-green">3.60 ms</div>
+                </div>
+            </div>
+
+            <!-- Card 4: Redis -->
+            <div class="card p-5 border-t-4 border-t-pink-500 bg-pink-900/10 relative overflow-hidden">
+                <h3 class="text-slate-400 text-sm font-bold uppercase tracking-wider mb-2">Redis (AOF)</h3>
+                <div class="mb-4">
+                    <div class="text-xs text-slate-500">GET QPS</div>
+                    <div class="text-3xl font-bold text-white">8.6w</div>
+                </div>
+                <div>
+                    <div class="text-xs text-slate-500">P50 Latency</div>
+                    <div class="text-2xl font-bold text-pink">8.68 ms</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dual Charts Section -->
+    <section class="max-w-7xl mx-auto mb-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <!-- QPS Chart -->
+        <div class="card p-6">
+            <h2 class="text-lg font-bold mb-4 flex items-center text-slate-200">
+                <span class="mr-2">⚡</span> 吞吐量对比 (Higher is Better)
+            </h2>
+            <div class="relative h-72 w-full">
+                <canvas id="qpsChart"></canvas>
+            </div>
         </div>
 
-        <!-- 详细数据表 -->
-        <div class="card">
-            <h2>📊 详细测试数据 (GET QPS)</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>数据结构</th>
-                        <th>io_uring</th>
-                        <th>epoll</th>
-                        <th>NtyCo (协程)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>RBTree (红黑树)</td>
-                        <td style="color: var(--iouring-color); font-weight: 700;">361,651</td>
-                        <td>296,312</td>
-                        <td>245,016</td>
-                    </tr>
-                    <tr>
-                        <td>Hash (哈希表)</td>
-                        <td style="color: var(--iouring-color); font-weight: 700;">341,060</td>
-                        <td>280,867</td>
-                        <td>231,682</td>
-                    </tr>
-                    <tr>
-                        <td>SkipList (跳表)</td>
-                        <td style="color: var(--iouring-color); font-weight: 700;">336,472</td>
-                        <td>282,635</td>
-                        <td>233,197</td>
-                    </tr>
-                </tbody>
-            </table>
-            <p style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 20px;">
-                * 数据单位为 QPS (Queries Per Second)<br>
-                * 测试环境: Linux, 50 并发连接, 100万请求, Pipeline机制
-            </p>
+        <!-- Latency Chart -->
+        <div class="card p-6">
+            <h2 class="text-lg font-bold mb-4 flex items-center text-slate-200">
+                <span class="mr-2">⏱️</span> P50 延迟对比 (Lower is Better)
+            </h2>
+            <div class="relative h-72 w-full">
+                <canvas id="latencyChart"></canvas>
+            </div>
         </div>
+    </section>
 
-        <!-- 技术分析 -->
-        <div class="card">
-            <h2>💡 性能分析与洞察</h2>
-            <ul style="color: var(--text-secondary); padding-left: 20px; font-size: 0.95rem;">
-                <li style="margin-bottom: 12px;">
-                    <strong style="color: var(--text-primary)">io_uring 的降维打击：</strong> 
-                    利用 Linux 最新的异步 IO 机制，io_uring 相比 epoll 提升了 <span style="color: var(--success-color)">~20%</span> 的吞吐量，相比 NtyCo 提升了 <span style="color: var(--success-color)">~50%</span>。零拷贝和批处理机制大幅减少了系统调用开销。
-                </li>
-                <li style="margin-bottom: 12px;">
-                    <strong style="color: var(--text-primary)">轻量级架构优势：</strong> 
-                    KVStore 剥离了持久化、集群等复杂功能，专注于核心内存读写路径。在纯吞吐量测试中，性能达到 Redis 的 <strong style="color: var(--success-color)">3.8倍</strong>。
-                </li>
-                <li>
-                    <strong style="color: var(--text-primary)">协程模型的表现：</strong> 
-                    虽然 NtyCo (24.5w) 略低于原生 epoll，但依然远超 Redis，且提供了更友好的同步编程模型，是用极小的性能损耗换取开发效率的典范。
-                </li>
-            </ul>
+    <!-- Bottom Section: Detailed Table -->
+    <section class="max-w-7xl mx-auto">
+        <div class="card p-6">
+            <h3 class="text-lg font-bold mb-4 flex items-center">
+                <span class="w-2 h-6 bg-slate-500 rounded mr-3"></span>
+                详细性能矩阵 (Hash Engine)
+            </h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left align-middle">
+                    <thead class="text-slate-400 border-b border-slate-700 bg-slate-800/50">
+                        <tr>
+                            <th class="py-3 px-4">系统 / 指标</th>
+                            <th class="py-3 px-4 text-center">GET QPS</th>
+                            <th class="py-3 px-4 text-center">SET QPS</th>
+                            <th class="py-3 px-4 text-center text-cyan">GET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center text-orange-400">SET P50 (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-800">
+                        <tr class="hover:bg-slate-800/30">
+                            <td class="py-3 px-4 font-medium text-cyan-400">KVStore (io_uring)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg">314,214</td>
+                            <td class="py-3 px-4 text-center">123,035</td>
+                            <td class="py-3 px-4 text-center font-bold text-cyan">2.53</td>
+                            <td class="py-3 px-4 text-center text-slate-300">6.45</td>
+                        </tr>
+                        <tr class="hover:bg-slate-800/30">
+                            <td class="py-3 px-4 font-medium text-purple-400">KVStore (Epoll)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg">258,482</td>
+                            <td class="py-3 px-4 text-center">113,726</td>
+                            <td class="py-3 px-4 text-center font-bold text-purple">3.00</td>
+                            <td class="py-3 px-4 text-center text-slate-300">6.88</td>
+                        </tr>
+                        <tr class="hover:bg-slate-800/30">
+                            <td class="py-3 px-4 font-medium text-green-400">KVStore (NtyCo)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg">212,228</td>
+                            <td class="py-3 px-4 text-center">105,054</td>
+                            <td class="py-3 px-4 text-center font-bold text-green">3.60</td>
+                            <td class="py-3 px-4 text-center text-slate-300">7.28</td>
+                        </tr>
+                        <tr class="bg-pink-900/10 hover:bg-pink-900/20">
+                            <td class="py-3 px-4 font-medium text-pink-400">Redis (AOF)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-300">85,962</td>
+                            <td class="py-3 px-4 text-center text-slate-400">78,845</td>
+                            <td class="py-3 px-4 text-center font-bold text-pink">8.68</td>
+                            <td class="py-3 px-4 text-center text-slate-400">9.52</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="flex justify-between items-center mt-4">
+                <div class="text-xs text-slate-500">
+                    * QPS: 每秒查询数 (数值越大越好)<br>
+                    * P50 Latency: 50% 请求的响应时间 (数值越小越好)
+                </div>
+                <!-- Mini Analysis Pill -->
+                <div class="bg-indigo-900/30 border border-indigo-500/30 rounded px-4 py-2 text-xs text-indigo-200">
+                    结论：KVStore (io_uring) 相比 Redis 延迟降低 <span class="font-bold text-white">70%</span>，吞吐提升 <span
+                        class="font-bold text-white">3.6x</span>
+                </div>
+            </div>
         </div>
-    </div>
+    </section>
 
-    <footer>
-        KVStore Project Performance Report &bull; Generated by Antigravity Agent
-    </footer>
-</div>
+    <script>
+        // Shared Config
+        const labels = ['io_uring', 'Epoll', 'NtyCo', 'Redis'];
+        const chartFont = { family: 'Inter', size: 11 };
+        const gridColor = '#334155';
+        const tickColor = '#94a3b8';
 
-<script>
-    Chart.defaults.color = '#94a3b8';
-    Chart.defaults.font.family = "'Inter', sans-serif";
-
-    // Redis Comparison Chart
-    const ctxRedis = document.getElementById('redisComparisonChart').getContext('2d');
-    new Chart(ctxRedis, {
-        type: 'bar',
-        data: {
-            labels: ['KVStore (io_uring)', 'KVStore (epoll)', 'KVStore (NtyCo)', 'Redis (Pipe=16)', 'Redis (Pipe=64)'],
-            datasets: [{
-                label: 'GET QPS',
-                data: [361651, 296312, 245016, 93519, 108003],
-                backgroundColor: [
-                    'rgba(56, 189, 248, 0.9)',  // io_uring
-                    'rgba(167, 139, 250, 0.8)', // epoll
-                    'rgba(52, 211, 153, 0.8)',  // ntyco
-                    'rgba(244, 114, 182, 0.6)', // redis 16
-                    'rgba(232, 121, 249, 0.6)'  // redis 64
-                ],
-                borderWidth: 0,
-                borderRadius: 4,
-                barPercentage: 0.6
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
-                    padding: 12,
-                    titleFont: { size: 13 },
-                    bodyFont: { size: 13, weight: 'bold' },
-                    displayColors: false,
-                    callbacks: {
-                        label: function(context) {
-                            return context.parsed.y.toLocaleString() + ' QPS';
-                        }
-                    }
-                }
+        // QPS Chart
+        new Chart(document.getElementById('qpsChart'), {
+            type: 'bar',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'GET QPS',
+                    data: [31.4, 25.8, 21.2, 8.6],
+                    backgroundColor: ['#22d3ee', '#a78bfa', '#34d399', '#f472b6'],
+                    borderRadius: 4
+                }]
             },
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    grid: { color: 'rgba(255, 255, 255, 0.05)', drawBorder: false },
-                    ticks: { font: { size: 11 } }
-                },
-                x: {
-                    grid: { display: false, drawBorder: false },
-                    ticks: { font: { size: 12, weight: '600' } }
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: gridColor },
+                        ticks: { color: tickColor, callback: v => v + 'w' }
+                    },
+                    x: { grid: { display: false }, ticks: { color: '#e2e8f0', font: { weight: 'bold' } } }
                 }
-            },
-            animation: {
-                duration: 1500,
-                easing: 'easeOutQuart'
             }
-        }
-    });
-</script>
+        });
 
+        // Latency Chart
+        new Chart(document.getElementById('latencyChart'), {
+            type: 'bar', // Using bar horizontal? No, vertical is fine if label is "Lower is Better"
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'P50 Latency (ms)',
+                    data: [2.53, 3.00, 3.60, 8.68],
+                    backgroundColor: ['#22d3ee', '#a78bfa', '#34d399', '#f472b6'],
+                    borderRadius: 4,
+                    // Make bars thinner?
+                    barPercentage: 0.6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: gridColor },
+                        ticks: { color: tickColor, callback: v => v + 'ms' }
+                    },
+                    x: { grid: { display: false }, ticks: { color: '#e2e8f0', font: { weight: 'bold' } } }
+                }
+            }
+        });
+    </script>
 </body>
+
 </html>

@@ -1,13 +1,18 @@
 #include "kvstore.h"
 #include <string.h>
 
+#if ENABLE_PERSISTENCE
+#include "wal_buffer.h"
+#include "wal_flusher.h"
+#endif
+
 #define KVSTORE_MAX_TOKENS 128
 
 const char *commands[] = {
-    "SET",    "GET",  "DEL",    "MOD",    "COUNT", "RSET",   "RGET",
-    "RDEL",   "RMOD", "RCOUNT", "HSET",   "HGET",  "HDEL",   "HMOD",
-    "HCOUNT", "SSET", "SGET",   "SDEL",   "SMOD",  "SCOUNT", "BSET",
-    "BGET",   "BDEL", "BMOD",   "BCOUNT",
+    "SET",    "GET",    "DEL",  "MOD",    "COUNT", "RSET",   "RGET",   "RDEL",
+    "RMOD",   "RCOUNT", "HSET", "HGET",   "HDEL",  "HMOD",   "HCOUNT", "SSET",
+    "SGET",   "SDEL",   "SMOD", "SCOUNT", "BSET",  "BGET",   "BDEL",   "BMOD",
+    "BCOUNT", "PSET",   "PGET", "PDEL",   "PMOD",  "PCOUNT", // 持久化命令
 };
 
 enum {
@@ -41,6 +46,13 @@ enum {
   KVS_CMD_BDEL,
   KVS_CMD_BMOD,
   KVS_CMD_BCOUNT,
+
+  // Persistence commands (PSET/PGET/PDEL/PMOD/PCOUNT)
+  KVS_CMD_PSET,
+  KVS_CMD_PGET,
+  KVS_CMD_PDEL,
+  KVS_CMD_PMOD,
+  KVS_CMD_PCOUNT,
 
   KVS_CMD_SIZE,
 };
@@ -470,6 +482,75 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
 
+#if ENABLE_PERSISTENCE
+  // ============ Persistence Commands ============
+  case KVS_CMD_PSET: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
+    int res = kvs_persist_set(key, value);
+    if (res == 0) {
+      snprintf(msg, BUFFER_LENGTH, "SUCCESS");
+    } else {
+      snprintf(msg, BUFFER_LENGTH, "FAILED");
+    }
+    break;
+  }
+  case KVS_CMD_PGET: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
+    char *val = kvs_persist_get(key);
+    if (val) {
+      snprintf(msg, BUFFER_LENGTH, "%s", val);
+    } else {
+      snprintf(msg, BUFFER_LENGTH, "NO EXIST");
+    }
+    break;
+  }
+  case KVS_CMD_PDEL: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
+    int res = kvs_persist_delete(key);
+    if (res == 0) {
+      snprintf(msg, BUFFER_LENGTH, "SUCCESS");
+    } else if (res > 0) {
+      snprintf(msg, BUFFER_LENGTH, "NO EXIST");
+    } else {
+      snprintf(msg, BUFFER_LENGTH, "ERROR");
+    }
+    break;
+  }
+  case KVS_CMD_PMOD: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
+    int res = kvs_persist_modify(key, value);
+    if (res == 0) {
+      snprintf(msg, BUFFER_LENGTH, "SUCCESS");
+    } else if (res > 0) {
+      snprintf(msg, BUFFER_LENGTH, "NO EXIST");
+    } else {
+      snprintf(msg, BUFFER_LENGTH, "ERROR");
+    }
+    break;
+  }
+  case KVS_CMD_PCOUNT: {
+    int count = kvs_persist_count();
+    if (count < 0) {
+      snprintf(msg, BUFFER_LENGTH, "ERROR");
+    } else {
+      snprintf(msg, BUFFER_LENGTH, "%d", count);
+    }
+    break;
+  }
+#endif // ENABLE_PERSISTENCE
+
   default: {
     // 未知命令，返回错误消息而不是崩溃
     printf("Unknown cmd: %s (cmd_id=%d)\n", tokens[0], cmd);
@@ -571,6 +652,39 @@ int init_kvengine(void) {
 #if ENABLE_BTREE_KVENGINE
   kvstore_btree_create(&Btree);
 #endif
+
+#if ENABLE_PERSISTENCE
+  // 初始化 WAL 缓冲区
+  wal_buffer_config_t wal_config = {.capacity = 16 * 1024 * 1024, // 16MB buffer
+                                    .data_dir = "./data"};
+  if (wal_buffer_init(&wal_config) < 0) {
+    printf("ERROR: Failed to initialize WAL buffer\n");
+    return -1;
+  }
+
+  // 启动后台刷盘线程
+  wal_flusher_config_t flusher_config = {
+      .flush_interval_ms = 1000, // 每秒刷一次
+      .flush_threshold_pct = 75, // 缓冲区 75% 时提前刷
+      .use_fsync = 1};
+  if (wal_flusher_start(&flusher_config) < 0) {
+    printf("ERROR: Failed to start WAL flusher\n");
+    return -1;
+  }
+
+  // 设置默认持久化引擎 (Hash Table)
+  kvs_persist_set_engine(KVS_ENGINE_RBTREE);
+
+  // 初始化通用持久化层
+  kvs_persist_create();
+
+  // 从 WAL 恢复数据 (Generic)
+  int recovered = kvs_persist_recover();
+  printf("[PERSISTENCE] Recovered %d entries from WAL to Hash Engine\n",
+         recovered);
+#endif
+
+  return 0;
 }
 // 退出 kvengine
 int exit_kvengine(void) {
@@ -594,6 +708,20 @@ int exit_kvengine(void) {
 #if ENABLE_BTREE_KVENGINE
   kvstore_btree_destory(&Btree);
 #endif
+
+#if ENABLE_PERSISTENCE
+  // 停止后台刷盘线程
+  wal_flusher_stop();
+  // 确保所有数据落盘
+  wal_flusher_force_flush();
+  // 关闭 WAL 缓冲区
+  wal_buffer_shutdown();
+  // 销毁持久化层
+  kvs_persist_destroy();
+  printf("[PERSISTENCE] Shutdown complete\n");
+#endif
+
+  return 0;
 }
 
 int init_ctx(void) {

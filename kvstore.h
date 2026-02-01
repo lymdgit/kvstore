@@ -56,13 +56,16 @@ void kvstore_free(void *ptr);
 #define NETWORK_NTYCO 1
 #define NETWORK_IOURING 2
 
-#define ENABLE_NETWORK_SELECT NETWORK_NTYCO
+#define ENABLE_NETWORK_SELECT NETWORK_EPOLL
 
 #define ENABLE_ARRAY_KVENGINE 1
 #define ENABLE_RBTREE_KVENGINE 1
 #define ENABLE_SKIPTABLE_KVENGINE 1
 #define ENABLE_BTREE_KVENGINE 1
 #define ENABLE_HASH_KVENGINE 1
+
+// 持久化支持 (io_uring async persistence)
+#define ENABLE_PERSISTENCE 1
 
 #define ENABLE_MEM_POOL 1
 
@@ -183,5 +186,40 @@ int kvs_btree_modify(btree *tree, char *key, char *value);
 int kvs_btree_count(btree *tree);
 
 #endif
+
+// ============================================================================
+// Persistence Layer (io_uring async persistence)
+// ============================================================================
+#if ENABLE_PERSISTENCE
+
+// Engine types for persistence
+typedef enum {
+  KVS_ENGINE_RBTREE = 0,
+  KVS_ENGINE_HASH,
+  KVS_ENGINE_SKIPLIST,
+  KVS_ENGINE_BTREE
+} kv_engine_type_t;
+
+// Set the active engine for persistence (default: HASH)
+void kvs_persist_set_engine(kv_engine_type_t type);
+
+// Generic Persistence API
+int kvs_persist_create(void);
+void kvs_persist_destroy(void);
+
+int kvs_persist_set(char *key, char *value);
+char *kvs_persist_get(char *key);
+int kvs_persist_delete(char *key);
+int kvs_persist_modify(char *key, char *value);
+int kvs_persist_count(void);
+
+// Recovery
+int kvs_persist_recover(void);
+
+// Internal WAL recovery callback
+void kvs_persist_wal_recover(const char *key, size_t key_len, const char *value,
+                             size_t value_len, void *user_data);
+
+#endif // ENABLE_PERSISTENCE
 
 #endif
