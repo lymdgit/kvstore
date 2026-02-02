@@ -3,7 +3,7 @@
 #include "wal_buffer.h"
 
 #if ENABLE_PERSISTENCE
-
+// 中间层：连接了wbuffer和kv引擎层
 static kv_engine_type_t g_current_engine = KVS_ENGINE_HASH; // Default
 
 void kvs_persist_set_engine(kv_engine_type_t type) { g_current_engine = type; }

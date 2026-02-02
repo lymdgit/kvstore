@@ -37,6 +37,8 @@ static struct {
 } g_flusher = {0};
 
 // Sleep for milliseconds
+// 计算所需的ms和ns
+// 告诉CPU，我接下来一段时间不需要你管我了，你可以去干别的了
 static void sleep_ms(int ms) {
   struct timespec ts;
   ts.tv_sec = ms / 1000;
@@ -45,6 +47,7 @@ static void sleep_ms(int ms) {
 }
 
 // Background thread function
+// 落盘线程
 static void *flusher_thread_func(void *arg) {
   (void)arg;
 
@@ -64,6 +67,7 @@ static void *flusher_thread_func(void *arg) {
     }
 
     if (should_flush) {
+      // 调用wal_buffer中的实际落盘函数
       int bytes = wal_buffer_flush();
       if (bytes > 0) {
         pthread_mutex_lock(&g_flusher.lock);
@@ -75,13 +79,16 @@ static void *flusher_thread_func(void *arg) {
 
     // Sleep for flush interval
     // Use shorter sleeps to check stop_requested more frequently
+    // 设置1000ms的休眠
     int remaining_ms = g_flusher.flush_interval_ms;
     while (remaining_ms > 0 && !g_flusher.stop_requested) {
       int sleep_time = remaining_ms > 100 ? 100 : remaining_ms;
+      // 执行真正的内核休眠
       sleep_ms(sleep_time);
       remaining_ms -= sleep_time;
 
       // Check threshold during sleep
+      // 每100ms查看一次wal_buffer是否需要落盘（指标就是90%）
       if (wal_buffer_needs_flush(90)) { // 90% = urgent
         break;
       }
@@ -102,7 +109,8 @@ static void *flusher_thread_func(void *arg) {
 
   return NULL;
 }
-
+// 创建刷盘的线程
+// 传入配置并做mutex的初始化
 int wal_flusher_start(const wal_flusher_config_t *config) {
   if (g_flusher.running) {
     return 0; // Already running
@@ -133,7 +141,7 @@ int wal_flusher_start(const wal_flusher_config_t *config) {
   g_flusher.running = 1;
   return 0;
 }
-
+// 停止刷盘线程
 void wal_flusher_stop(void) {
   if (!g_flusher.running) {
     return;

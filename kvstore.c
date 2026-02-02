@@ -742,8 +742,8 @@ void exit_ctx(void) {
 
 int main() {
 
-  init_ctx();
-  init_kvengine();
+  init_ctx();      // 初始化内存池
+  init_kvengine(); // 初始化kvengine && WAL
 // 调用具体的网络模型
 #if (ENABLE_NETWORK_SELECT == NETWORK_EPOLL)
   epoll_entry();

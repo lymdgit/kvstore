@@ -166,7 +166,7 @@ int epoll_entry(void) {
   int i = 0;
 
   epfd = epoll_create(1); // int size
-
+  // 创建监听socket，并设置为检测 可读状态（accept_cb）
   for (i = 0; i < port_count; i++) {
     int sockfd = init_server(port + i); // 2048, 2049, 2050, 2051 ... 2057
     connlist[sockfd].fd = sockfd;

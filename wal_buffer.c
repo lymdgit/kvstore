@@ -141,7 +141,9 @@ void wal_buffer_shutdown(void) {
   g_wal.initialized = 0;
   printf("[WAL] Shutdown complete\n");
 }
-
+// 向内存中的buffer中追加数据
+// 如果内存满了，就先刷盘
+// 涉及到了spinlock和mutex两者的使用方式
 int wal_buffer_append(const char *key, size_t key_len, const char *value,
                       size_t value_len) {
   if (!g_wal.initialized || !key) {
@@ -197,7 +199,7 @@ int wal_buffer_append(const char *key, size_t key_len, const char *value,
 
   return 0;
 }
-
+// 获取未刷盘的数据量
 size_t wal_buffer_pending_size(void) {
   if (!g_wal.initialized) {
     return 0;
@@ -218,6 +220,8 @@ int wal_buffer_needs_flush(int threshold_percent) {
 }
 
 // Internal standard write fallback
+// 标准的写操作，其实redis采用的是后台线程是每秒进行fsync一次
+// 每秒之间的数据扔到page cache中，fsyn是一个非常昂贵的IO操作
 static int wal_buffer_flush_std(char *data, size_t len) {
   ssize_t written = write(g_wal.wal_fd, data, len);
   if (written < 0) {
@@ -229,12 +233,19 @@ static int wal_buffer_flush_std(char *data, size_t len) {
 }
 
 // Internal io_uring flush
+// 1. 准备写
+// 2. 准备fsync
+// 3. 提交
+// 4. 等待完成
+// 5. 检查结果
+// 6. 推进CQ ring
 static int wal_buffer_flush_uring(char *data, size_t len) {
   struct io_uring_sqe *sqe_write;
   struct io_uring_sqe *sqe_fsync;
 
   // We need 2 SQEs: Write + Fsync
   // They must be linked so fsync executes after write
+  // 确保队列里至少有两个空位
   if (io_uring_sq_space_left(&g_wal.ring) < 2) {
     // Should not happen in this simplified design, but handle it
     io_uring_submit(&g_wal.ring); // Try to clear space
@@ -280,6 +291,7 @@ static int wal_buffer_flush_uring(char *data, size_t len) {
   }
 
   // Advance CQ ring
+  // 告诉内核我看过这些通知了，CQ队列可以推进了
   io_uring_cq_advance(&g_wal.ring, count);
 
   if (io_err < 0) {
@@ -289,12 +301,19 @@ static int wal_buffer_flush_uring(char *data, size_t len) {
 
   return (int)len;
 }
-
+// 调用io_uring进行刷盘
+// 1. 获取未刷盘的数据量
+// 2. 计算刷盘偏移
+// 3. 调用io_uring进行刷盘
+// 4. 更新刷盘位置
+// 5. 重置位置（如果缓冲区为空）
 int wal_buffer_flush(void) {
   if (!g_wal.initialized) {
     return -1;
   }
 
+  // 获取未刷盘的数据量
+  // 全局变量的简单读，使用spinlock
   pthread_spin_lock(&g_wal.spinlock);
   size_t write_pos = g_wal.write_pos;
   size_t flush_pos = g_wal.flush_pos;
@@ -303,8 +322,9 @@ int wal_buffer_flush(void) {
   if (write_pos == flush_pos) {
     return 0; // Nothing to flush
   }
-
+  // pending:需要进行刷盘的大小
   size_t pending = write_pos - flush_pos;
+  // flush_offset:刷盘的偏移量
   size_t flush_offset = flush_pos % g_wal.capacity;
 
   // Actual Flush Logic
@@ -320,10 +340,12 @@ int wal_buffer_flush(void) {
   }
 
   // Update flush position
+  // 刷盘成功，更新刷盘位置
   pthread_spin_lock(&g_wal.spinlock);
   g_wal.flush_pos = write_pos;
 
   // Reset positions if buffer is empty (avoid overflow)
+  // 如果缓冲区为空，重置位置（避免溢出）
   if (g_wal.flush_pos == g_wal.write_pos) {
     g_wal.flush_pos = 0;
     g_wal.write_pos = 0;
@@ -332,7 +354,13 @@ int wal_buffer_flush(void) {
 
   return written;
 }
-
+// 回放硬盘里的数据
+// 1. 打开WAL文件
+// 2. 获取文件大小
+// 3. 读取文件内容
+// 4. 解析WAL文件
+// 5. 调用回调函数
+// 6. 关闭文件
 int wal_buffer_replay(wal_replay_callback_t callback, void *user_data) {
   if (!callback) {
     return -1;
@@ -393,7 +421,8 @@ int wal_buffer_replay(wal_replay_callback_t callback, void *user_data) {
 
     const char *key = data + offset + sizeof(wal_entry_header_t);
     const char *value = key + header->key_len;
-
+    // 这里利用了生产者-消费者模式，本函数式生产者，进行解析，数据扔给回调函数（消费者）
+    // 消费者是去如何写到内存中我不管
     callback(key, header->key_len, header->value_len > 0 ? value : NULL,
              header->value_len, user_data);
 
