@@ -21,42 +21,46 @@
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
-        .text-cyan {
-            color: #0891b2;
-        }
-
-        .text-purple {
-            color: #7c3aed;
-        }
-
-        .text-green {
-            color: #059669;
-        }
-
-        .text-pink {
-            color: #db2777;
-        }
-
-        .text-orange {
-            color: #ea580c;
-        }
-
         .gradient-text {
             background: linear-gradient(to right, #0284c7, #6366f1);
             -webkit-background-clip: text;
             color: transparent;
         }
 
-        /* 打印优化 */
-        @media print {
-            body {
-                background-color: white !important;
-            }
+        .highlight-row {
+            background: linear-gradient(90deg, #ecfeff 0%, #f0fdf4 100%);
+        }
 
-            .card {
-                box-shadow: none !important;
-                border: 1px solid #ccc !important;
-            }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .badge-best {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+
+        .badge-sqpoll {
+            background-color: #fef3c7;
+            color: #92400e;
+        }
+
+        .env-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            margin: 2px;
+        }
+
+        @media print {
+            body { background-color: white !important; }
+            .card { box-shadow: none !important; border: 1px solid #ccc !important; }
         }
     </style>
 </head>
@@ -64,64 +68,130 @@
 <body class="p-6 md:p-10 min-h-screen">
 
     <!-- Header -->
-    <header class="text-center mb-10">
-        <h1 class="text-3xl md:text-5xl font-bold mb-3 gradient-text">KVStore 性能基准测试报告</h1>
-        <p class="text-slate-600">核心指标双重奏：吞吐量 (QPS) 与 延迟响应 (Latency)</p>
+    <header class="text-center mb-8">
+        <h1 class="text-3xl md:text-4xl font-bold mb-3 gradient-text">KVStore 高性能键值存储引擎</h1>
+        <p class="text-lg text-slate-600 mb-4">三种网络 I/O 模型 × 三种存储引擎 性能基准测试报告</p>
+        
+        <!-- Test Environment -->
+        <div class="card max-w-4xl mx-auto p-4 mb-4">
+            <h3 class="text-sm font-bold text-slate-700 mb-3">📋 测试环境</h3>
+            <div class="flex flex-wrap justify-center gap-2 text-xs">
+                <span class="env-tag bg-blue-100 text-blue-700">Ubuntu 22.04 LTS</span>
+                <span class="env-tag bg-purple-100 text-purple-700">Linux Kernel 5.15</span>
+                <span class="env-tag bg-green-100 text-green-700">liburing 2.x</span>
+                <span class="env-tag bg-orange-100 text-orange-700">GCC 11.4</span>
+            </div>
+            <div class="flex flex-wrap justify-center gap-2 text-xs mt-2">
+                <span class="env-tag bg-cyan-100 text-cyan-700">50 并发连接</span>
+                <span class="env-tag bg-pink-100 text-pink-700">100万请求</span>
+                <span class="env-tag bg-yellow-100 text-yellow-700">Pipeline = 16</span>
+                <span class="env-tag bg-indigo-100 text-indigo-700">Value = 64 bytes</span>
+            </div>
+        </div>
     </header>
 
-    <!-- Key Metrics Summary (Moved to Top) -->
+    <!-- Key Metrics Summary -->
     <section class="max-w-7xl mx-auto mb-8">
+        <h2 class="text-lg font-bold mb-4 text-slate-700">🏆 核心对比: 三种网络 I/O 模型 vs Redis</h2>
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
             <!-- Card 1: io_uring -->
-            <div class="card p-5 border-t-4 border-t-cyan-400 relative overflow-hidden group">
-                <div class="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition text-6xl">🚀</div>
-                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">KVStore (io_uring)</h3>
-                <div class="mb-4">
+            <div class="card p-5 border-t-4 border-t-emerald-500 relative overflow-hidden">
+                <span class="badge badge-best absolute top-2 right-2">BEST</span>
+                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">io_uring (SQPOLL)</h3>
+                <div class="mb-3">
                     <div class="text-xs text-slate-500">GET QPS</div>
-                    <div class="text-3xl font-bold text-slate-800">31.4w</div>
+                    <div class="text-3xl font-bold text-emerald-600">57.8w</div>
+                </div>
+                <div class="mb-3">
+                    <div class="text-xs text-slate-500">SET QPS</div>
+                    <div class="text-xl font-bold text-emerald-600">16.6w</div>
                 </div>
                 <div>
-                    <div class="text-xs text-slate-500">P50 Latency</div>
-                    <div class="text-2xl font-bold text-cyan">2.53 ms</div>
+                    <div class="text-xs text-slate-500">GET P50</div>
+                    <div class="text-lg font-bold text-emerald-600">1.34 ms</div>
                 </div>
             </div>
 
             <!-- Card 2: Epoll -->
             <div class="card p-5 border-t-4 border-t-purple-400 relative overflow-hidden">
-                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">KVStore (Epoll)</h3>
-                <div class="mb-4">
+                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">Reactor (Epoll)</h3>
+                <div class="mb-3">
                     <div class="text-xs text-slate-500">GET QPS</div>
-                    <div class="text-3xl font-bold text-slate-800">25.8w</div>
+                    <div class="text-3xl font-bold text-slate-800">27.4w</div>
+                </div>
+                <div class="mb-3">
+                    <div class="text-xs text-slate-500">SET QPS</div>
+                    <div class="text-xl font-bold text-slate-700">10.8w</div>
                 </div>
                 <div>
-                    <div class="text-xs text-slate-500">P50 Latency</div>
-                    <div class="text-2xl font-bold text-purple">3.00 ms</div>
+                    <div class="text-xs text-slate-500">GET P50</div>
+                    <div class="text-lg font-bold text-purple-600">2.82 ms</div>
                 </div>
             </div>
 
             <!-- Card 3: NtyCo -->
             <div class="card p-5 border-t-4 border-t-green-400 relative overflow-hidden">
-                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">KVStore (NtyCo)</h3>
-                <div class="mb-4">
+                <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">NtyCo 协程</h3>
+                <div class="mb-3">
                     <div class="text-xs text-slate-500">GET QPS</div>
-                    <div class="text-3xl font-bold text-slate-800">21.2w</div>
+                    <div class="text-3xl font-bold text-slate-800">21.8w</div>
+                </div>
+                <div class="mb-3">
+                    <div class="text-xs text-slate-500">SET QPS</div>
+                    <div class="text-xl font-bold text-slate-700">10.3w</div>
                 </div>
                 <div>
-                    <div class="text-xs text-slate-500">P50 Latency</div>
-                    <div class="text-2xl font-bold text-green">3.60 ms</div>
+                    <div class="text-xs text-slate-500">GET P50</div>
+                    <div class="text-lg font-bold text-green-600">3.51 ms</div>
                 </div>
             </div>
 
             <!-- Card 4: Redis -->
             <div class="card p-5 border-t-4 border-t-pink-500 bg-pink-50 relative overflow-hidden">
+                <span class="badge bg-pink-200 text-pink-700 absolute top-2 right-2">Baseline</span>
                 <h3 class="text-slate-600 text-sm font-bold uppercase tracking-wider mb-2">Redis (AOF)</h3>
-                <div class="mb-4">
+                <div class="mb-3">
                     <div class="text-xs text-slate-500">GET QPS</div>
-                    <div class="text-3xl font-bold text-slate-800">8.6w</div>
+                    <div class="text-3xl font-bold text-slate-700">8.95w</div>
+                </div>
+                <div class="mb-3">
+                    <div class="text-xs text-slate-500">SET QPS</div>
+                    <div class="text-xl font-bold text-slate-600">8.25w</div>
                 </div>
                 <div>
-                    <div class="text-xs text-slate-500">P50 Latency</div>
-                    <div class="text-2xl font-bold text-pink">8.68 ms</div>
+                    <div class="text-xs text-slate-500">GET P50</div>
+                    <div class="text-lg font-bold text-pink-600">8.28 ms</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Performance Gain Analysis -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6 bg-gradient-to-r from-emerald-50 to-cyan-50 border-emerald-200">
+            <h3 class="text-lg font-bold mb-4 flex items-center text-emerald-700">
+                <span class="mr-2">🚀</span> io_uring 性能提升分析
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-emerald-600">6.5x</div>
+                    <div class="text-sm text-slate-600">GET QPS vs Redis</div>
+                    <div class="text-xs text-slate-400 mt-1">8.95w → 57.8w</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-emerald-600">2x</div>
+                    <div class="text-sm text-slate-600">SET QPS vs Redis</div>
+                    <div class="text-xs text-slate-400 mt-1">8.25w → 16.6w</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-cyan-600">2.1x</div>
+                    <div class="text-sm text-slate-600">GET QPS vs Epoll</div>
+                    <div class="text-xs text-slate-400 mt-1">27.4w → 57.8w</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-pink-600">-84%</div>
+                    <div class="text-sm text-slate-600">GET 延迟 vs Redis</div>
+                    <div class="text-xs text-slate-400 mt-1">8.28ms → 1.34ms</div>
                 </div>
             </div>
         </div>
@@ -132,7 +202,7 @@
         <!-- QPS Chart -->
         <div class="card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center text-slate-700">
-                <span class="mr-2">⚡</span> 吞吐量对比 (Higher is Better)
+                <span class="mr-2">⚡</span> GET 吞吐量对比 (QPS)
             </h2>
             <div class="relative h-72 w-full">
                 <canvas id="qpsChart"></canvas>
@@ -142,7 +212,7 @@
         <!-- Latency Chart -->
         <div class="card p-6">
             <h2 class="text-lg font-bold mb-4 flex items-center text-slate-700">
-                <span class="mr-2">⏱️</span> P50 延迟对比 (Lower is Better)
+                <span class="mr-2">⏱️</span> GET P50 延迟对比 (ms)
             </h2>
             <div class="relative h-72 w-full">
                 <canvas id="latencyChart"></canvas>
@@ -150,73 +220,281 @@
         </div>
     </section>
 
-    <!-- Bottom Section: Detailed Table -->
-    <section class="max-w-7xl mx-auto">
+    <!-- Detailed Table: io_uring -->
+    <section class="max-w-7xl mx-auto mb-8">
         <div class="card p-6">
             <h3 class="text-lg font-bold mb-4 flex items-center">
-                <span class="w-2 h-6 bg-slate-500 rounded mr-3"></span>
-                详细性能矩阵 (Hash Engine)
+                <span class="w-2 h-6 bg-emerald-500 rounded mr-3"></span>
+                io_uring (SQPOLL) - 三种存储引擎详细数据
             </h3>
             <div class="overflow-x-auto">
                 <table class="w-full text-sm text-left align-middle">
                     <thead class="text-slate-600 border-b border-slate-300 bg-slate-100">
                         <tr>
-                            <th class="py-3 px-4">系统 / 指标</th>
+                            <th class="py-3 px-4">存储引擎</th>
                             <th class="py-3 px-4 text-center">GET QPS</th>
                             <th class="py-3 px-4 text-center">SET QPS</th>
                             <th class="py-3 px-4 text-center" style="color: #0891b2;">GET P50 (ms)</th>
                             <th class="py-3 px-4 text-center" style="color: #ea580c;">SET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center">GET P99 (ms)</th>
+                            <th class="py-3 px-4 text-center">SET P99 (ms)</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-slate-200">
-                        <tr class="hover:bg-slate-50">
-                            <td class="py-3 px-4 font-medium" style="color: #0891b2;">KVStore (io_uring)</td>
-                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">314,214</td>
-                            <td class="py-3 px-4 text-center text-slate-700">123,035</td>
-                            <td class="py-3 px-4 text-center font-bold" style="color: #0891b2;">2.53</td>
-                            <td class="py-3 px-4 text-center text-slate-600">6.45</td>
+                        <tr class="highlight-row">
+                            <td class="py-3 px-4 font-medium text-emerald-700">跳表 (SkipList)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-emerald-600">578,723</td>
+                            <td class="py-3 px-4 text-center text-slate-700">166,161</td>
+                            <td class="py-3 px-4 text-center font-bold text-emerald-600">1.335</td>
+                            <td class="py-3 px-4 text-center text-slate-600">4.675</td>
+                            <td class="py-3 px-4 text-center text-slate-500">1.975</td>
+                            <td class="py-3 px-4 text-center text-slate-500">6.185</td>
                         </tr>
                         <tr class="hover:bg-slate-50">
-                            <td class="py-3 px-4 font-medium" style="color: #7c3aed;">KVStore (Epoll)</td>
-                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">258,482</td>
-                            <td class="py-3 px-4 text-center text-slate-700">113,726</td>
-                            <td class="py-3 px-4 text-center font-bold" style="color: #7c3aed;">3.00</td>
-                            <td class="py-3 px-4 text-center text-slate-600">6.88</td>
+                            <td class="py-3 px-4 font-medium text-cyan-700">红黑树 (RBTree)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">582,456</td>
+                            <td class="py-3 px-4 text-center text-slate-700">155,108</td>
+                            <td class="py-3 px-4 text-center font-bold text-cyan-600">1.325</td>
+                            <td class="py-3 px-4 text-center text-slate-600">4.965</td>
+                            <td class="py-3 px-4 text-center text-slate-500">2.065</td>
+                            <td class="py-3 px-4 text-center text-slate-500">6.495</td>
                         </tr>
                         <tr class="hover:bg-slate-50">
-                            <td class="py-3 px-4 font-medium" style="color: #059669;">KVStore (NtyCo)</td>
-                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">212,228</td>
-                            <td class="py-3 px-4 text-center text-slate-700">105,054</td>
-                            <td class="py-3 px-4 text-center font-bold" style="color: #059669;">3.60</td>
-                            <td class="py-3 px-4 text-center text-slate-600">7.28</td>
-                        </tr>
-                        <tr class="bg-pink-50 hover:bg-pink-100">
-                            <td class="py-3 px-4 font-medium" style="color: #db2777;">Redis (AOF)</td>
-                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-700">85,962</td>
-                            <td class="py-3 px-4 text-center text-slate-600">78,845</td>
-                            <td class="py-3 px-4 text-center font-bold" style="color: #db2777;">8.68</td>
-                            <td class="py-3 px-4 text-center text-slate-600">9.52</td>
+                            <td class="py-3 px-4 font-medium text-purple-700">哈希表 (Hash)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">572,384</td>
+                            <td class="py-3 px-4 text-center text-slate-700">160,120</td>
+                            <td class="py-3 px-4 text-center font-bold text-purple-600">1.335</td>
+                            <td class="py-3 px-4 text-center text-slate-600">4.855</td>
+                            <td class="py-3 px-4 text-center text-slate-500">2.065</td>
+                            <td class="py-3 px-4 text-center text-slate-500">6.545</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
-            <div class="flex justify-between items-center mt-4">
-                <div class="text-xs text-slate-500">
-                    * QPS: 每秒查询数 (数值越大越好)<br>
-                    * P50 Latency: 50% 请求的响应时间 (数值越小越好)
+        </div>
+    </section>
+
+    <!-- Detailed Table: Epoll -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6">
+            <h3 class="text-lg font-bold mb-4 flex items-center">
+                <span class="w-2 h-6 bg-purple-500 rounded mr-3"></span>
+                Reactor (Epoll) - 三种存储引擎详细数据
+            </h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left align-middle">
+                    <thead class="text-slate-600 border-b border-slate-300 bg-slate-100">
+                        <tr>
+                            <th class="py-3 px-4">存储引擎</th>
+                            <th class="py-3 px-4 text-center">GET QPS</th>
+                            <th class="py-3 px-4 text-center">SET QPS</th>
+                            <th class="py-3 px-4 text-center" style="color: #0891b2;">GET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center" style="color: #ea580c;">SET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center">GET P99 (ms)</th>
+                            <th class="py-3 px-4 text-center">SET P99 (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-emerald-700">跳表 (SkipList)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">263,986</td>
+                            <td class="py-3 px-4 text-center text-slate-700">110,287</td>
+                            <td class="py-3 px-4 text-center font-bold text-purple-600">2.925</td>
+                            <td class="py-3 px-4 text-center text-slate-600">7.105</td>
+                            <td class="py-3 px-4 text-center text-slate-500">4.475</td>
+                            <td class="py-3 px-4 text-center text-slate-500">10.845</td>
+                        </tr>
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-cyan-700">红黑树 (RBTree)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">273,552</td>
+                            <td class="py-3 px-4 text-center text-slate-700">108,067</td>
+                            <td class="py-3 px-4 text-center font-bold text-purple-600">2.815</td>
+                            <td class="py-3 px-4 text-center text-slate-600">7.225</td>
+                            <td class="py-3 px-4 text-center text-slate-500">4.325</td>
+                            <td class="py-3 px-4 text-center text-slate-500">11.075</td>
+                        </tr>
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-purple-700">哈希表 (Hash)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">257,767</td>
+                            <td class="py-3 px-4 text-center text-slate-700">112,630</td>
+                            <td class="py-3 px-4 text-center font-bold text-purple-600">3.015</td>
+                            <td class="py-3 px-4 text-center text-slate-600">6.935</td>
+                            <td class="py-3 px-4 text-center text-slate-500">4.715</td>
+                            <td class="py-3 px-4 text-center text-slate-500">10.855</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Detailed Table: NtyCo -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6">
+            <h3 class="text-lg font-bold mb-4 flex items-center">
+                <span class="w-2 h-6 bg-green-500 rounded mr-3"></span>
+                NtyCo 协程 - 三种存储引擎详细数据
+            </h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left align-middle">
+                    <thead class="text-slate-600 border-b border-slate-300 bg-slate-100">
+                        <tr>
+                            <th class="py-3 px-4">存储引擎</th>
+                            <th class="py-3 px-4 text-center">GET QPS</th>
+                            <th class="py-3 px-4 text-center">SET QPS</th>
+                            <th class="py-3 px-4 text-center" style="color: #0891b2;">GET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center" style="color: #ea580c;">SET P50 (ms)</th>
+                            <th class="py-3 px-4 text-center">GET P99 (ms)</th>
+                            <th class="py-3 px-4 text-center">SET P99 (ms)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-200">
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-emerald-700">跳表 (SkipList)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">217,793</td>
+                            <td class="py-3 px-4 text-center text-slate-700">101,530</td>
+                            <td class="py-3 px-4 text-center font-bold text-green-600">3.515</td>
+                            <td class="py-3 px-4 text-center text-slate-600">7.555</td>
+                            <td class="py-3 px-4 text-center text-slate-500">7.165</td>
+                            <td class="py-3 px-4 text-center text-slate-500">15.595</td>
+                        </tr>
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-cyan-700">红黑树 (RBTree)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">222,719</td>
+                            <td class="py-3 px-4 text-center text-slate-700">101,269</td>
+                            <td class="py-3 px-4 text-center font-bold text-green-600">3.445</td>
+                            <td class="py-3 px-4 text-center text-slate-600">7.565</td>
+                            <td class="py-3 px-4 text-center text-slate-500">7.075</td>
+                            <td class="py-3 px-4 text-center text-slate-500">15.615</td>
+                        </tr>
+                        <tr class="hover:bg-slate-50">
+                            <td class="py-3 px-4 font-medium text-purple-700">哈希表 (Hash)</td>
+                            <td class="py-3 px-4 text-center font-bold text-lg text-slate-800">214,551</td>
+                            <td class="py-3 px-4 text-center text-slate-700">103,626</td>
+                            <td class="py-3 px-4 text-center font-bold text-green-600">3.565</td>
+                            <td class="py-3 px-4 text-center text-slate-600">7.405</td>
+                            <td class="py-3 px-4 text-center text-slate-500">7.455</td>
+                            <td class="py-3 px-4 text-center text-slate-500">15.175</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <!-- Redis Baseline -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6 bg-pink-50 border-pink-200">
+            <h3 class="text-lg font-bold mb-4 flex items-center text-pink-700">
+                <span class="w-2 h-6 bg-pink-500 rounded mr-3"></span>
+                Redis 7.x 基准测试 (对照组)
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="bg-white p-4 rounded-lg">
+                    <div class="text-sm text-slate-600 mb-2">测试命令</div>
+                    <code class="text-xs bg-slate-100 p-2 rounded block">
+                        redis-benchmark -p 6379 -c 50 -n 1000000 -t set,get -P 16 -d 64 -q
+                    </code>
                 </div>
-                <!-- Mini Analysis Pill -->
-                <div class="bg-indigo-50 border border-indigo-300 rounded px-4 py-2 text-xs text-indigo-700">
-                    结论：KVStore (io_uring) 相比 Redis 延迟降低 <span class="font-bold text-indigo-900">70%</span>，吞吐提升 <span
-                        class="font-bold text-indigo-900">3.6x</span>
+                <div class="bg-white p-4 rounded-lg">
+                    <div class="text-sm text-slate-600 mb-2">Redis 配置</div>
+                    <div class="text-xs text-slate-500">
+                        <p>• AOF 开启，appendfsync = everysec</p>
+                        <p>• RDB 关闭</p>
+                        <p>• 单线程模式</p>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+                <div class="bg-white p-3 rounded-lg">
+                    <div class="text-xs text-slate-500">SET QPS</div>
+                    <div class="text-xl font-bold text-slate-700">82,508</div>
+                </div>
+                <div class="bg-white p-3 rounded-lg">
+                    <div class="text-xs text-slate-500">GET QPS</div>
+                    <div class="text-xl font-bold text-slate-700">89,534</div>
+                </div>
+                <div class="bg-white p-3 rounded-lg">
+                    <div class="text-xs text-slate-500">SET P50</div>
+                    <div class="text-xl font-bold text-pink-600">9.02 ms</div>
+                </div>
+                <div class="bg-white p-3 rounded-lg">
+                    <div class="text-xs text-slate-500">GET P50</div>
+                    <div class="text-xl font-bold text-pink-600">8.28 ms</div>
                 </div>
             </div>
         </div>
     </section>
 
+    <!-- Network IO Comparison Chart -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6">
+            <h3 class="text-lg font-bold mb-4 flex items-center">
+                <span class="w-2 h-6 bg-indigo-500 rounded mr-3"></span>
+                网络 I/O 模型对比 (以跳表引擎为例)
+            </h3>
+            <div class="relative h-80 w-full">
+                <canvas id="networkChart"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- Key Findings -->
+    <section class="max-w-7xl mx-auto mb-8">
+        <div class="card p-6">
+            <h3 class="text-lg font-bold mb-4 flex items-center text-slate-700">
+                <span class="mr-2">💡</span> 核心发现
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="space-y-3">
+                    <h4 class="font-bold text-emerald-700">io_uring 优势</h4>
+                    <ul class="text-sm text-slate-600 space-y-1">
+                        <li>✅ SQPOLL 模式消除系统调用开销，GET QPS 达到 57.8w</li>
+                        <li>✅ 相比 Epoll 提升 2.1 倍吞吐，延迟降低 52%</li>
+                        <li>✅ 相比 Redis 提升 6.5 倍吞吐，延迟降低 84%</li>
+                    </ul>
+                </div>
+                <div class="space-y-3">
+                    <h4 class="font-bold text-purple-700">存储引擎对比</h4>
+                    <ul class="text-sm text-slate-600 space-y-1">
+                        <li>📊 三种引擎 GET 性能接近 (57-58w QPS)</li>
+                        <li>📊 SET 性能: 跳表 16.6w > 哈希 16.0w > 红黑树 15.5w</li>
+                        <li>📊 网络 I/O 是主要瓶颈，引擎差异影响较小</li>
+                    </ul>
+                </div>
+                <div class="space-y-3">
+                    <h4 class="font-bold text-green-700">NtyCo 协程</h4>
+                    <ul class="text-sm text-slate-600 space-y-1">
+                        <li>🔄 用户态协程，编程模型同步简洁</li>
+                        <li>🔄 性能略低于 Epoll，主要开销在协程切换</li>
+                        <li>🔄 P99 延迟较高 (7ms vs Epoll 4.5ms)</li>
+                    </ul>
+                </div>
+                <div class="space-y-3">
+                    <h4 class="font-bold text-pink-700">持久化开销</h4>
+                    <ul class="text-sm text-slate-600 space-y-1">
+                        <li>💾 SET 需要写 WAL，性能约为 GET 的 30%</li>
+                        <li>💾 io_uring async WAL 减少同步写盘阻塞</li>
+                        <li>💾 与 Redis AOF (everysec) 策略一致</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer Notes -->
+    <section class="max-w-7xl mx-auto">
+        <div class="text-xs text-slate-500 text-center">
+            <p>* QPS: 每秒查询数 (数值越大越好) | P50/P99: 50%/99% 请求的响应时间 (数值越小越好)</p>
+            <p>* 测试环境: Ubuntu 22.04, Linux 5.15, liburing 2.x | 持久化: io_uring async WAL</p>
+            <p class="mt-2 font-medium text-indigo-600">
+                结论: io_uring (SQPOLL) 是高性能网络服务的最佳选择，相比 Redis GET 延迟降低 84%，吞吐提升 6.5x
+            </p>
+        </div>
+    </section>
+
     <script>
         // Shared Config
-        const labels = ['io_uring', 'Epoll', 'NtyCo', 'Redis'];
         const chartFont = { family: 'Inter', size: 11 };
         const gridColor = '#e2e8f0';
         const tickColor = '#475569';
@@ -225,11 +503,11 @@
         new Chart(document.getElementById('qpsChart'), {
             type: 'bar',
             data: {
-                labels: labels,
+                labels: ['io_uring', 'Epoll', 'NtyCo', 'Redis'],
                 datasets: [{
-                    label: 'GET QPS',
-                    data: [31.4, 25.8, 21.2, 8.6],
-                    backgroundColor: ['#22d3ee', '#a78bfa', '#34d399', '#f472b6'],
+                    label: 'GET QPS (万)',
+                    data: [57.8, 27.4, 21.8, 8.95],
+                    backgroundColor: ['#10b981', '#a78bfa', '#34d399', '#f472b6'],
                     borderRadius: 4
                 }]
             },
@@ -250,15 +528,14 @@
 
         // Latency Chart
         new Chart(document.getElementById('latencyChart'), {
-            type: 'bar', // Using bar horizontal? No, vertical is fine if label is "Lower is Better"
+            type: 'bar',
             data: {
-                labels: labels,
+                labels: ['io_uring', 'Epoll', 'NtyCo', 'Redis'],
                 datasets: [{
                     label: 'P50 Latency (ms)',
-                    data: [2.53, 3.00, 3.60, 8.68],
-                    backgroundColor: ['#22d3ee', '#a78bfa', '#34d399', '#f472b6'],
+                    data: [1.34, 2.82, 3.51, 8.28],
+                    backgroundColor: ['#10b981', '#a78bfa', '#34d399', '#f472b6'],
                     borderRadius: 4,
-                    // Make bars thinner?
                     barPercentage: 0.6
                 }]
             },
@@ -271,6 +548,46 @@
                         beginAtZero: true,
                         grid: { color: gridColor },
                         ticks: { color: tickColor, callback: v => v + 'ms' }
+                    },
+                    x: { grid: { display: false }, ticks: { color: '#1e293b', font: { weight: 'bold' } } }
+                }
+            }
+        });
+
+        // Network IO Model Comparison Chart
+        new Chart(document.getElementById('networkChart'), {
+            type: 'bar',
+            data: {
+                labels: ['io_uring (SQPOLL)', 'Reactor (Epoll)', 'NtyCo 协程', 'Redis (AOF)'],
+                datasets: [
+                    {
+                        label: 'GET QPS (万)',
+                        data: [57.87, 26.40, 21.78, 8.95],
+                        backgroundColor: '#22d3ee',
+                        borderRadius: 4
+                    },
+                    {
+                        label: 'SET QPS (万)',
+                        data: [16.62, 11.03, 10.15, 8.25],
+                        backgroundColor: '#f97316',
+                        borderRadius: 4
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { font: chartFont }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: gridColor },
+                        ticks: { color: tickColor, callback: v => v + 'w' }
                     },
                     x: { grid: { display: false }, ticks: { color: '#1e293b', font: { weight: 'bold' } } }
                 }

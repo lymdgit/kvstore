@@ -15,37 +15,46 @@
 #include <liburing.h>
 #include <sys/time.h>
 
-// port:2048-2067
-#define IOURING_ENTRIES 1024
+// ============================================================================
+// Configuration
+// ============================================================================
+#define IOURING_ENTRIES 2048
 #define IOURING_PORT_COUNT 20
 #define IOURING_BASE_PORT 2048
 
-// io_uring 事件类型
+// SQPOLL mode configuration
+#define ENABLE_SQPOLL 1
+#define SQPOLL_IDLE_MS 2000 // Kernel thread sleeps after 2s idle
+
+// io_uring event types
 enum {
   EVENT_TYPE_ACCEPT = 0,
   EVENT_TYPE_READ,
   EVENT_TYPE_WRITE,
 };
 
-// 连接请求信息
-struct conn_info {
-  int fd;
-  int type;
-};
+// ============================================================================
+// Global State
+// ============================================================================
 
-// io_uring 上下文
+// io_uring context
 struct io_uring ring;
 
-// 连接管理 - 只在 NETWORK_IOURING 时编译
+// Connection management - pre-allocated to avoid malloc per request
 struct conn_item uring_connlist[1048576] = {0};
 
-// 时间统计
+// Special conn_item entries for accept events (one per listen socket)
+struct conn_item uring_accept_conns[IOURING_PORT_COUNT] = {0};
+
+// Time statistics
 struct timeval uring_tv_begin;
 
 #define TIME_SUB_MS(tv1, tv2)                                                  \
   ((tv1.tv_sec - tv2.tv_sec) * 1000 + (tv1.tv_usec - tv2.tv_usec) / 1000)
 
-// 初始化服务器 socket
+// ============================================================================
+// Server Socket Initialization
+// ============================================================================
 int uring_init_server(unsigned short port) {
 
   int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -76,9 +85,13 @@ int uring_init_server(unsigned short port) {
   return sockfd;
 }
 
-// 提交 accept 请求
-int add_accept_request(int sockfd, struct sockaddr_in *client_addr,
-                       socklen_t *client_len) {
+// ============================================================================
+// SQE Submission Functions (No malloc - use embedded conn_item)
+// ============================================================================
+
+// Submit accept request using pre-allocated accept_conn
+int add_accept_request(int sockfd, int accept_idx,
+                       struct sockaddr_in *client_addr, socklen_t *client_len) {
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
@@ -88,19 +101,16 @@ int add_accept_request(int sockfd, struct sockaddr_in *client_addr,
   io_uring_prep_accept(sqe, sockfd, (struct sockaddr *)client_addr, client_len,
                        0);
 
-  struct conn_info *conn = (struct conn_info *)malloc(sizeof(struct conn_info));
-  if (!conn) {
-    return -1;
-  }
-  conn->fd = sockfd;
-  conn->type = EVENT_TYPE_ACCEPT;
+  // Use pre-allocated accept conn_item
+  uring_accept_conns[accept_idx].fd = sockfd;
+  uring_accept_conns[accept_idx].uring_event_type = EVENT_TYPE_ACCEPT;
 
-  io_uring_sqe_set_data(sqe, conn);
+  io_uring_sqe_set_data(sqe, &uring_accept_conns[accept_idx]);
 
   return 0;
 }
 
-// 提交 read 请求
+// Submit read request using pre-allocated connlist entry
 int add_read_request(int clientfd) {
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
@@ -108,27 +118,21 @@ int add_read_request(int clientfd) {
     return -1;
   }
 
-  // 初始化连接项
+  // Initialize connection item (no malloc!)
   uring_connlist[clientfd].fd = clientfd;
   memset(uring_connlist[clientfd].rbuffer, 0, BUFFER_LENGTH);
   uring_connlist[clientfd].rlen = 0;
+  uring_connlist[clientfd].uring_event_type = EVENT_TYPE_READ;
 
   io_uring_prep_recv(sqe, clientfd, uring_connlist[clientfd].rbuffer,
                      BUFFER_LENGTH, 0);
 
-  struct conn_info *conn = (struct conn_info *)malloc(sizeof(struct conn_info));
-  if (!conn) {
-    return -1;
-  }
-  conn->fd = clientfd;
-  conn->type = EVENT_TYPE_READ;
-
-  io_uring_sqe_set_data(sqe, conn);
+  io_uring_sqe_set_data(sqe, &uring_connlist[clientfd]);
 
   return 0;
 }
 
-// 提交 write 请求
+// Submit write request using pre-allocated connlist entry
 int add_write_request(int clientfd) {
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
@@ -136,52 +140,55 @@ int add_write_request(int clientfd) {
     return -1;
   }
 
+  uring_connlist[clientfd].uring_event_type = EVENT_TYPE_WRITE;
+
   io_uring_prep_send(sqe, clientfd, uring_connlist[clientfd].wbuffer,
                      uring_connlist[clientfd].wlen, 0);
 
-  struct conn_info *conn = (struct conn_info *)malloc(sizeof(struct conn_info));
-  if (!conn) {
-    return -1;
-  }
-  conn->fd = clientfd;
-  conn->type = EVENT_TYPE_WRITE;
-
-  io_uring_sqe_set_data(sqe, conn);
+  io_uring_sqe_set_data(sqe, &uring_connlist[clientfd]);
 
   return 0;
 }
 
-// 处理 accept 完成事件
-int handle_accept_completion(int sockfd, int clientfd) {
+// ============================================================================
+// CQE Completion Handlers
+// ============================================================================
+
+// Handle accept completion
+int handle_accept_completion(int accept_idx, int clientfd) {
 
   if (clientfd < 0) {
     printf("accept failed: %d\n", clientfd);
     return -1;
   }
 
-  // 添加 read 请求
+  // 重要：为新连接初始化 rlen = 0
+  // 防止 fd 复用时读取到旧连接的残留数据
+  uring_connlist[clientfd].rlen = 0;
+
+  // Add read request for new client
   add_read_request(clientfd);
 
-  // 继续监听新连接
+  // Re-arm accept for this listen socket
   static struct sockaddr_in client_addr;
   static socklen_t client_len = sizeof(client_addr);
-  add_accept_request(sockfd, &client_addr, &client_len);
+  int sockfd = uring_accept_conns[accept_idx].fd;
+  add_accept_request(sockfd, accept_idx, &client_addr, &client_len);
 
-  // 统计连接数
+  // Statistics
   if ((clientfd % 1000) == 999) {
     struct timeval tv_cur;
     gettimeofday(&tv_cur, NULL);
     int time_used = TIME_SUB_MS(tv_cur, uring_tv_begin);
-
     memcpy(&uring_tv_begin, &tv_cur, sizeof(struct timeval));
-
     printf("clientfd : %d, time_used: %d\n", clientfd, time_used);
   }
 
   return 0;
 }
 
-// 处理 read 完成事件
+// Handle read completion
+// 简化版本：每次读取后直接处理（buffer 太小无法做累积）
 int handle_read_completion(int clientfd, int bytes_read) {
 
   if (bytes_read <= 0) {
@@ -189,22 +196,23 @@ int handle_read_completion(int clientfd, int bytes_read) {
       printf("disconnect: fd=%d\n", clientfd);
     }
     close(clientfd);
+    uring_connlist[clientfd].rlen = 0;
     return -1;
   }
 
   uring_connlist[clientfd].rlen = bytes_read;
+  uring_connlist[clientfd].rbuffer[bytes_read] = '\0';
 
-  // 处理 kvstore 请求
+  // Process kvstore request
   kvstore_request(&uring_connlist[clientfd]);
-  // wlen 已在 kvstore_request 中设置
 
-  // 添加 write 请求
+  // Add write request
   add_write_request(clientfd);
 
   return 0;
 }
 
-// 处理 write 完成事件
+// Handle write completion
 int handle_write_completion(int clientfd, int bytes_written) {
 
   if (bytes_written < 0) {
@@ -212,24 +220,50 @@ int handle_write_completion(int clientfd, int bytes_written) {
     return -1;
   }
 
-  // 写完成后，继续读取
+  // Continue reading after write completes
   add_read_request(clientfd);
 
   return 0;
 }
 
-// io_uring 入口函数
+// ============================================================================
+// Main Entry Point with SQPOLL Mode
+// ============================================================================
 int iouring_entry(void) {
 
   int i = 0;
 
-  // 初始化 io_uring
-  if (io_uring_queue_init(IOURING_ENTRIES, &ring, 0) < 0) {
-    perror("io_uring_queue_init");
-    return -1;
+  // Initialize io_uring with SQPOLL mode for zero syscall submission
+  struct io_uring_params params;
+  memset(&params, 0, sizeof(params));
+
+  // Runtime flag to track if SQPOLL is actually active
+  int sqpoll_active = 0;
+
+#if ENABLE_SQPOLL
+  params.flags = IORING_SETUP_SQPOLL;
+  params.sq_thread_idle = SQPOLL_IDLE_MS;
+  printf("[io_uring] SQPOLL mode enabled (idle timeout: %dms)\n",
+         SQPOLL_IDLE_MS);
+#endif
+
+  if (io_uring_queue_init_params(IOURING_ENTRIES, &ring, &params) < 0) {
+    perror("io_uring_queue_init_params");
+    // Fallback to non-SQPOLL mode
+    printf("[io_uring] Fallback to standard mode (SQPOLL requires root)\n");
+    if (io_uring_queue_init(IOURING_ENTRIES, &ring, 0) < 0) {
+      perror("io_uring_queue_init");
+      return -1;
+    }
+    sqpoll_active = 0; // Fallback to standard mode
+  } else {
+#if ENABLE_SQPOLL
+    sqpoll_active = 1; // SQPOLL initialized successfully
+    printf("[io_uring] SQPOLL kernel thread active\n");
+#endif
   }
 
-  // 初始化多个端口
+  // Initialize listen sockets on multiple ports
   static struct sockaddr_in client_addr;
   static socklen_t client_len = sizeof(client_addr);
 
@@ -239,56 +273,73 @@ int iouring_entry(void) {
       continue;
     }
     printf("listen port: %d\n", IOURING_BASE_PORT + i);
-    add_accept_request(sockfd, &client_addr, &client_len);
+    add_accept_request(sockfd, i, &client_addr, &client_len);
   }
 
-  // 提交所有请求
+  // Initial submit (only needed once, SQPOLL takes over after this)
   io_uring_submit(&ring);
 
   gettimeofday(&uring_tv_begin, NULL);
 
-  // 事件循环
+  printf("[io_uring] Event loop started\n");
+
+  // Main event loop with batch CQE processing
   while (1) {
 
     struct io_uring_cqe *cqe;
+    unsigned head;
+    int cqe_count = 0;
 
-    // 等待完成事件
+    // Wait for at least one completion event
     int ret = io_uring_wait_cqe(&ring, &cqe);
     if (ret < 0) {
       perror("io_uring_wait_cqe");
       continue;
     }
 
-    // 获取用户数据
-    struct conn_info *conn = (struct conn_info *)io_uring_cqe_get_data(cqe);
-    if (!conn) {
-      io_uring_cqe_seen(&ring, cqe);
-      continue;
+    // Batch process all available CQEs (key optimization!)
+    io_uring_for_each_cqe(&ring, head, cqe) {
+
+      struct conn_item *item = (struct conn_item *)io_uring_cqe_get_data(cqe);
+      if (!item) {
+        cqe_count++;
+        continue;
+      }
+
+      int res = cqe->res;
+      int event_type = item->uring_event_type;
+
+      // Dispatch based on event type
+      switch (event_type) {
+
+      case EVENT_TYPE_ACCEPT: {
+        // Find accept_idx from item pointer
+        int accept_idx = (int)(item - uring_accept_conns);
+        handle_accept_completion(accept_idx, res);
+        break;
+      }
+
+      case EVENT_TYPE_READ: {
+        handle_read_completion(item->fd, res);
+        break;
+      }
+
+      case EVENT_TYPE_WRITE: {
+        handle_write_completion(item->fd, res);
+        break;
+      }
+      }
+
+      cqe_count++;
     }
 
-    int res = cqe->res;
+    // Advance CQ ring in one batch (more efficient than per-event cqe_seen)
+    io_uring_cq_advance(&ring, cqe_count);
 
-    // 根据事件类型处理
-    switch (conn->type) {
-
-    case EVENT_TYPE_ACCEPT: {
-      handle_accept_completion(conn->fd, res);
-      break;
-    }
-
-    case EVENT_TYPE_READ: {
-      handle_read_completion(conn->fd, res);
-      break;
-    }
-
-    case EVENT_TYPE_WRITE: {
-      handle_write_completion(conn->fd, res);
-      break;
-    }
-    }
-
-    free(conn);
-    io_uring_cqe_seen(&ring, cqe);
+    // Submit new SQEs to kernel
+    // IMPORTANT: io_uring_submit() must always be called to update SQ tail
+    // pointer! In SQPOLL mode, liburing internally avoids syscall unless
+    // NEED_WAKEUP is set.
     io_uring_submit(&ring);
   }
 
@@ -299,7 +350,7 @@ int iouring_entry(void) {
 
 #else
 
-// 非 NETWORK_IOURING 模式时提供空实现
+// Non NETWORK_IOURING mode provides empty implementation
 int iouring_entry(void) { return 0; }
 
 #endif

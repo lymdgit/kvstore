@@ -32,6 +32,7 @@
 #define DEFAULT_CLIENTS 50
 #define DEFAULT_REQUESTS 100000
 #define DEFAULT_PIPELINE 1
+#define DEFAULT_DATA_SIZE 64
 
 // Histogram configuration
 // 0-200ms range with 10us resolution
@@ -65,6 +66,7 @@ typedef struct {
   int num_clients;
   long total_requests;
   int pipeline_size;
+  int data_size;           // 数据大小（value长度）
   store_type_t store_type; // 存储类型
 } benchmark_config_t;
 
@@ -194,6 +196,21 @@ void *benchmark_worker(void *arg) {
     return NULL;
   }
 
+  // 预生成固定长度的 value 数据
+  char *value_data = malloc(config->data_size + 1);
+  if (!value_data) {
+    perror("malloc value_data");
+    close(sockfd);
+    free(send_buf);
+    free(recv_buf);
+    return NULL;
+  }
+  // 用可打印字符填充 value (循环使用 'a'-'z')
+  for (int i = 0; i < config->data_size; i++) {
+    value_data[i] = 'a' + (i % 26);
+  }
+  value_data[config->data_size] = '\0';
+
   long requests_sent = 0;
   long requests_completed = 0;
   long long latency_sum = 0;
@@ -214,8 +231,9 @@ void *benchmark_worker(void *arg) {
     for (int i = 0; i < batch_size; i++) {
       long key_id = requests_sent + i + ctx->thread_id * config->total_requests;
       if (ctx->cmd_type == CMD_SET) {
-        pos += snprintf(send_buf + pos, MAX_BUFFER_SIZE - pos,
-                        "%s key%ld value%ld\n", set_cmd, key_id, key_id);
+        // 使用固定长度的 value 数据
+        pos += snprintf(send_buf + pos, MAX_BUFFER_SIZE - pos, "%s key%ld %s\n",
+                        set_cmd, key_id, value_data);
       } else {
         pos += snprintf(send_buf + pos, MAX_BUFFER_SIZE - pos, "%s key%ld\n",
                         get_cmd, key_id);
@@ -272,6 +290,7 @@ void *benchmark_worker(void *arg) {
   ctx->latency_sum_us = latency_sum;
 
   // 清理
+  free(value_data);
   free(send_buf);
   free(recv_buf);
   close(sockfd);
@@ -464,6 +483,8 @@ void print_usage(const char *prog) {
          DEFAULT_REQUESTS);
   printf("  -P <pipeline>   Pipeline requests (default: %d)\n",
          DEFAULT_PIPELINE);
+  printf("  -d <size>       Data size of value in bytes (default: %d)\n",
+         DEFAULT_DATA_SIZE);
   printf("  -t <type>       Storage type: rbtree, hash, skip, btree, persist "
          "(default: "
          "rbtree)\n");
@@ -484,11 +505,12 @@ int main(int argc, char *argv[]) {
   config.num_clients = DEFAULT_CLIENTS;
   config.total_requests = DEFAULT_REQUESTS;
   config.pipeline_size = DEFAULT_PIPELINE;
+  config.data_size = DEFAULT_DATA_SIZE;
   config.store_type = STORE_RBTREE; // 默认使用红黑树
 
   // 解析命令行参数
   int opt;
-  while ((opt = getopt(argc, argv, "h:p:c:n:P:t:?")) != -1) {
+  while ((opt = getopt(argc, argv, "h:p:c:n:P:d:t:?")) != -1) {
     switch (opt) {
     case 'h':
       strncpy(config.host, optarg, sizeof(config.host) - 1);
@@ -511,6 +533,13 @@ int main(int argc, char *argv[]) {
       config.pipeline_size = atoi(optarg);
       if (config.pipeline_size < 1)
         config.pipeline_size = 1;
+      break;
+    case 'd':
+      config.data_size = atoi(optarg);
+      if (config.data_size < 1)
+        config.data_size = 1;
+      if (config.data_size > 65535)
+        config.data_size = 65535; // 限制最大值，避免溢出
       break;
     case 't':
       if (strcmp(optarg, "rbtree") == 0 || strcmp(optarg, "r") == 0) {
@@ -545,6 +574,7 @@ int main(int argc, char *argv[]) {
   printf("Clients: %d\n", config.num_clients);
   printf("Requests: %ld\n", config.total_requests);
   printf("Pipeline: %d\n", config.pipeline_size);
+  printf("Data size: %d bytes\n", config.data_size);
   printf("==================\n");
 
   // 运行SET测试

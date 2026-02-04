@@ -94,7 +94,7 @@ KVStore 是一个**高性能、多存储引擎**的网络键值存储系统。�
 ## 支持的数据结构
 
 | 数据结构 | 前缀 | 查找复杂度 | 插入复杂度 | 适用场景 |
-|---------|------|-----------|-----------|---------| 
+|---------|------|-----------|-----------|---------|
 | 数组 | - | O(n) | O(1) | 小规模数据，简单场景 |
 | 红黑树 | R | O(log n) | O(log n) | 有序数据，范围查询 |
 | 哈希表 | H | O(1) | O(1) | 快速随机访问 |
@@ -123,7 +123,7 @@ sudo apt-get install liburing-dev
 ### 编译
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/lymdgit/kvstore.git
 cd kvstore
 make
 ```
@@ -135,7 +135,7 @@ make
 ./kvstore
 
 # 运行测试客户端 (Pipeline 模式)
-./testcase -s 127.0.0.1 -p 2048 -m 30
+./kv_benchmark -c 50 -n 1000000 -P 16 -t persist
 ```
 
 ## 配置选项
@@ -184,15 +184,7 @@ make
 | 修改 | MOD | RMOD | HMOD | SMOD | BMOD |
 | 计数 | COUNT | RCOUNT | HCOUNT | SCOUNT | BCOUNT |
 
-### 使用示例
-
-```bash
-# 使用 netcat 测试
-echo "SET name Alice\n" | nc 127.0.0.1 2048    # SUCCESS
-echo "GET name\n" | nc 127.0.0.1 2048          # Alice
-echo "HSET age 25\n" | nc 127.0.0.1 2048       # SUCCESS (哈希表)
-echo "RSET score 100\n" | nc 127.0.0.1 2048    # SUCCESS (红黑树)
-```
+### 
 
 ## 性能测试
 
@@ -243,7 +235,6 @@ kvstore/
 ├── iouring_entry.c        # io_uring 网络模型
 │
 ├── kv_benchmark.c         # 性能测试工具
-├── testcase.c             # 功能测试客户端
 ├── Makefile               # 编译脚本
 ├── NtyCo/                 # 协程库子模块
 └── README.md              # 项目说明

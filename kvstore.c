@@ -671,6 +671,14 @@ int init_kvengine(void) {
     printf("ERROR: Failed to start WAL flusher\n");
     return -1;
   }
+  /*
+    typedef enum {
+      KVS_ENGINE_RBTREE = 0,
+      KVS_ENGINE_HASH,
+      KVS_ENGINE_SKIPLIST,
+      KVS_ENGINE_BTREE
+    } kv_engine_type_t;
+  */
 
   // 设置默认持久化引擎 (Hash Table)
   kvs_persist_set_engine(KVS_ENGINE_RBTREE);

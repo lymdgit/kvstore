@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define BUFFER_LENGTH 512
+#define BUFFER_LENGTH 4096
 
 // #define ENABLE_LOG	1
 
@@ -39,6 +39,9 @@ struct conn_item {
     RCALLBACK recv_callback;
   } recv_t;
   RCALLBACK send_callback;
+
+  // io_uring specific: embedded conn_info to avoid malloc per request
+  int uring_event_type;
 };
 // libevent -->
 
@@ -56,7 +59,7 @@ void kvstore_free(void *ptr);
 #define NETWORK_NTYCO 1
 #define NETWORK_IOURING 2
 
-#define ENABLE_NETWORK_SELECT NETWORK_EPOLL
+#define ENABLE_NETWORK_SELECT NETWORK_NTYCO
 
 #define ENABLE_ARRAY_KVENGINE 1
 #define ENABLE_RBTREE_KVENGINE 1
