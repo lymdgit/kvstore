@@ -679,7 +679,7 @@ int init_kvengine(void) {
       KVS_ENGINE_BTREE
     } kv_engine_type_t;
   */
-
+  /******************************切换持久化引擎************************************/
   // 设置默认持久化引擎 (Hash Table)
   kvs_persist_set_engine(KVS_ENGINE_RBTREE);
 
