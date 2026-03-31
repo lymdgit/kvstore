@@ -126,6 +126,11 @@ void dest_hashtable(hashtable_t *hash) {
       node = node->next;
       hash->nodes[i] = node;
 
+      // Bug fix: 释放动态分配的 key 和 value，避免内存泄漏
+#if ENABLE_POINTER_KEY
+      if (tmp->key) kvstore_free(tmp->key);
+      if (tmp->value) kvstore_free(tmp->value);
+#endif
       kvstore_free(tmp);
     }
   }

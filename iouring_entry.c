@@ -18,13 +18,16 @@
 // ============================================================================
 // Configuration
 // ============================================================================
-#define IOURING_ENTRIES 2048
+#define IOURING_ENTRIES 4096      // 更大的 SQ/CQ ring，避免高并发下溢出
 #define IOURING_PORT_COUNT 20
 #define IOURING_BASE_PORT 2048
 
 // SQPOLL mode configuration
 #define ENABLE_SQPOLL 1
 #define SQPOLL_IDLE_MS 2000 // Kernel thread sleeps after 2s idle
+
+// fd 关闭标志：防止 fd 复用后 use-after-close
+#define FD_CLOSED_FLAG -1
 
 // io_uring event types
 enum {
@@ -48,6 +51,10 @@ struct conn_item uring_accept_conns[IOURING_PORT_COUNT] = {0};
 
 // Time statistics
 struct timeval uring_tv_begin;
+
+// Bug fix: 为每个监听端口分配独立的 client_addr，避免并发 accept 覆盖
+static struct sockaddr_in accept_client_addrs[IOURING_PORT_COUNT];
+static socklen_t accept_client_lens[IOURING_PORT_COUNT];
 
 #define TIME_SUB_MS(tv1, tv2)                                                  \
   ((tv1.tv_sec - tv2.tv_sec) * 1000 + (tv1.tv_usec - tv2.tv_usec) / 1000)
@@ -111,11 +118,20 @@ int add_accept_request(int sockfd, int accept_idx,
 }
 
 // Submit read request using pre-allocated connlist entry
+// 若 SQ ring 已满，先 submit 把已有 SQE 推给内核，再重试一次
 int add_read_request(int clientfd) {
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
-    return -1;
+    // SQ ring 满了：flush 已有 SQE，再重试
+    io_uring_submit(&ring);
+    sqe = io_uring_get_sqe(&ring);
+    if (!sqe) {
+      fprintf(stderr, "[iouring] SQ ring full, drop read for fd=%d\n", clientfd);
+      close(clientfd);
+      uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
+      return -1;
+    }
   }
 
   // Initialize connection item (no malloc!)
@@ -137,7 +153,15 @@ int add_write_request(int clientfd) {
 
   struct io_uring_sqe *sqe = io_uring_get_sqe(&ring);
   if (!sqe) {
-    return -1;
+    // SQ ring 满了：flush 已有 SQE，再重试
+    io_uring_submit(&ring);
+    sqe = io_uring_get_sqe(&ring);
+    if (!sqe) {
+      fprintf(stderr, "[iouring] SQ ring full, drop write for fd=%d\n", clientfd);
+      close(clientfd);
+      uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
+      return -1;
+    }
   }
 
   uring_connlist[clientfd].uring_event_type = EVENT_TYPE_WRITE;
@@ -158,7 +182,6 @@ int add_write_request(int clientfd) {
 int handle_accept_completion(int accept_idx, int clientfd) {
 
   if (clientfd < 0) {
-    printf("accept failed: %d\n", clientfd);
     return -1;
   }
 
@@ -169,33 +192,33 @@ int handle_accept_completion(int accept_idx, int clientfd) {
   // Add read request for new client
   add_read_request(clientfd);
 
-  // Re-arm accept for this listen socket
-  static struct sockaddr_in client_addr;
-  static socklen_t client_len = sizeof(client_addr);
+  // Bug fix: 使用独立的 client_addr，避免并发覆盖
   int sockfd = uring_accept_conns[accept_idx].fd;
-  add_accept_request(sockfd, accept_idx, &client_addr, &client_len);
+  accept_client_lens[accept_idx] = sizeof(accept_client_addrs[accept_idx]);
+  add_accept_request(sockfd, accept_idx,
+                     &accept_client_addrs[accept_idx],
+                     &accept_client_lens[accept_idx]);
 
-  // Statistics
-  if ((clientfd % 1000) == 999) {
-    struct timeval tv_cur;
-    gettimeofday(&tv_cur, NULL);
-    int time_used = TIME_SUB_MS(tv_cur, uring_tv_begin);
-    memcpy(&uring_tv_begin, &tv_cur, sizeof(struct timeval));
-    printf("clientfd : %d, time_used: %d\n", clientfd, time_used);
-  }
+
 
   return 0;
 }
 
 // Handle read completion
-// 简化版本：每次读取后直接处理（buffer 太小无法做累积）
 int handle_read_completion(int clientfd, int bytes_read) {
 
+  // 检查 fd 是否已被标记为关闭（fd 复用保护）
+  if (uring_connlist[clientfd].fd == FD_CLOSED_FLAG) {
+    return -1;
+  }
+
   if (bytes_read <= 0) {
-    if (bytes_read == 0) {
-      printf("disconnect: fd=%d\n", clientfd);
+    if (bytes_read == -ECANCELED) {
+      // 连接已关闭后内核取消了挂起的 read，正常现象，静默处理
+      return -1;
     }
     close(clientfd);
+    uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
     uring_connlist[clientfd].rlen = 0;
     return -1;
   }
@@ -215,8 +238,19 @@ int handle_read_completion(int clientfd, int bytes_read) {
 // Handle write completion
 int handle_write_completion(int clientfd, int bytes_written) {
 
+  // 检查 fd 是否已被标记为关闭
+  if (uring_connlist[clientfd].fd == FD_CLOSED_FLAG) {
+    return -1;
+  }
+
   if (bytes_written < 0) {
+    if (bytes_written == -ECANCELED) {
+      // 连接关闭后内核取消了挂起的 write，静默处理
+      uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
+      return -1;
+    }
     close(clientfd);
+    uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
     return -1;
   }
 
@@ -264,16 +298,15 @@ int iouring_entry(void) {
   }
 
   // Initialize listen sockets on multiple ports
-  static struct sockaddr_in client_addr;
-  static socklen_t client_len = sizeof(client_addr);
-
   for (i = 0; i < IOURING_PORT_COUNT; i++) {
     int sockfd = uring_init_server(IOURING_BASE_PORT + i);
     if (sockfd < 0) {
       continue;
     }
     printf("listen port: %d\n", IOURING_BASE_PORT + i);
-    add_accept_request(sockfd, i, &client_addr, &client_len);
+    // Bug fix: 使用独立的 client_addr
+    accept_client_lens[i] = sizeof(accept_client_addrs[i]);
+    add_accept_request(sockfd, i, &accept_client_addrs[i], &accept_client_lens[i]);
   }
 
   // Initial submit (only needed once, SQPOLL takes over after this)

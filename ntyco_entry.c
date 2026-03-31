@@ -86,8 +86,7 @@ void server_reader(void *arg) {
       // 确保字符串以 \0 结尾
       item.rbuffer[ret] = '\0';
 
-      if (fd > MAX_CLIENT_NUM)
-        printf("read from server: %.*s\n", ret, item.rbuffer);
+
 
       kvstore_request(&item);
 
@@ -123,7 +122,7 @@ void server(void *arg) {
   bind(fd, (struct sockaddr *)&local, sizeof(struct sockaddr_in));
 
   listen(fd, 512);
-  printf("listen port : %d\n", port);
+
 
   struct timeval tv_begin;
   gettimeofday(&tv_begin, NULL);

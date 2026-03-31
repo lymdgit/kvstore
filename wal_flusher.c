@@ -7,6 +7,7 @@
 #include "wal_buffer.h"
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,8 +22,8 @@
 // Global flusher state
 static struct {
   pthread_t thread;
-  int running;
-  int stop_requested;
+  atomic_int running;
+  atomic_int stop_requested;
 
   // Configuration
   int flush_interval_ms;
@@ -54,7 +55,7 @@ static void *flusher_thread_func(void *arg) {
   printf("[WAL-FLUSHER] Started (interval=%dms, threshold=%d%%)\n",
          g_flusher.flush_interval_ms, g_flusher.flush_threshold_pct);
 
-  while (!g_flusher.stop_requested) {
+  while (!atomic_load(&g_flusher.stop_requested)) {
     // Check if we need to flush
     int should_flush = 0;
 
@@ -81,7 +82,7 @@ static void *flusher_thread_func(void *arg) {
     // Use shorter sleeps to check stop_requested more frequently
     // 设置1000ms的休眠
     int remaining_ms = g_flusher.flush_interval_ms;
-    while (remaining_ms > 0 && !g_flusher.stop_requested) {
+    while (remaining_ms > 0 && !atomic_load(&g_flusher.stop_requested)) {
       int sleep_time = remaining_ms > 100 ? 100 : remaining_ms;
       // 执行真正的内核休眠
       sleep_ms(sleep_time);
@@ -112,7 +113,7 @@ static void *flusher_thread_func(void *arg) {
 // 创建刷盘的线程
 // 传入配置并做mutex的初始化
 int wal_flusher_start(const wal_flusher_config_t *config) {
-  if (g_flusher.running) {
+  if (atomic_load(&g_flusher.running)) {
     return 0; // Already running
   }
 
@@ -125,7 +126,7 @@ int wal_flusher_start(const wal_flusher_config_t *config) {
                                       : DEFAULT_FLUSH_THRESHOLD_PCT;
   g_flusher.use_fsync = config ? config->use_fsync : DEFAULT_USE_FSYNC;
 
-  g_flusher.stop_requested = 0;
+  atomic_store(&g_flusher.stop_requested, 0);
   g_flusher.total_flushes = 0;
   g_flusher.total_bytes = 0;
 
@@ -138,28 +139,28 @@ int wal_flusher_start(const wal_flusher_config_t *config) {
     return -1;
   }
 
-  g_flusher.running = 1;
+  atomic_store(&g_flusher.running, 1);
   return 0;
 }
 // 停止刷盘线程
 void wal_flusher_stop(void) {
-  if (!g_flusher.running) {
+  if (!atomic_load(&g_flusher.running)) {
     return;
   }
 
-  g_flusher.stop_requested = 1;
+  atomic_store(&g_flusher.stop_requested, 1);
 
   // Wait for thread to finish
   pthread_join(g_flusher.thread, NULL);
 
   pthread_mutex_destroy(&g_flusher.lock);
 
-  g_flusher.running = 0;
+  atomic_store(&g_flusher.running, 0);
 }
 
 int wal_flusher_force_flush(void) { return wal_buffer_flush(); }
 
-int wal_flusher_is_running(void) { return g_flusher.running; }
+int wal_flusher_is_running(void) { return atomic_load(&g_flusher.running); }
 
 void wal_flusher_get_stats(unsigned long *total_flushes,
                            unsigned long *total_bytes) {

@@ -1,0 +1,35 @@
+services:
+  kvstore:
+    build: .
+    image: kvstore:latest
+    container_name: kvstore-server
+    privileged: true                    # Required for io_uring SQPOLL mode
+    ports:
+      - "2048-2067:2048-2067"           # Map all 20 listening ports
+    volumes:
+      - kvstore-data:/app/data          # Persist WAL data across restarts
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'HSET health_check alive' | nc -w1 localhost 2048 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # Optional: benchmark testing container
+  # Run with: docker compose --profile test up benchmark
+  benchmark:
+    build: .
+    image: kvstore:latest
+    container_name: kvstore-benchmark
+    entrypoint: ["/app/kv_benchmark"]
+    command: ["kvstore-server", "2048"]
+    depends_on:
+      kvstore:
+        condition: service_healthy
+    profiles:
+      - test
+
+volumes:
+  kvstore-data:
+    driver: local

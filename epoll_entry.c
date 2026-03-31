@@ -75,15 +75,7 @@ int accept_cb(int fd) {
   connlist[clientfd].recv_t.recv_callback = recv_cb;
   connlist[clientfd].send_callback = send_cb;
 
-  if ((clientfd % 1000) == 999) {
-    struct timeval tv_cur;
-    gettimeofday(&tv_cur, NULL);
-    int time_used = TIME_SUB_MS(tv_cur, zvoice_king);
 
-    memcpy(&zvoice_king, &tv_cur, sizeof(struct timeval));
-
-    printf("clientfd : %d, time_used: %d\n", clientfd, time_used);
-  }
 
   return clientfd;
 }
@@ -94,7 +86,6 @@ int recv_cb(int fd) { // fd --> EPOLLIN
 
   int count = recv(fd, buffer, BUFFER_LENGTH - 1, 0); // 留一个字节给 \0
   if (count == 0) {
-    printf("disconnect\n");
 
     epoll_ctl(epfd, EPOLL_CTL_DEL, fd, NULL);
     close(fd);

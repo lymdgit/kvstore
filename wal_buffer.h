@@ -111,6 +111,19 @@ int wal_buffer_replay(wal_replay_callback_t callback, void *user_data);
  */
 int wal_buffer_get_fd(void);
 
+/**
+ * @brief Compact WAL file on startup
+ *
+ * Reads the entire WAL, deduplicates entries (keeps only latest
+ * value per key, removes tombstones), and rewrites a compact WAL.
+ * This prevents unbounded WAL growth from repeated SET/DEL operations.
+ *
+ * Should be called AFTER wal_buffer_replay() completes.
+ *
+ * @return Number of live entries after compaction, negative on error
+ */
+int wal_buffer_compact(void);
+
 #ifdef __cplusplus
 }
 #endif

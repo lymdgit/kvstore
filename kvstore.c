@@ -201,6 +201,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
   switch (cmd) {
   // array
   case KVS_CMD_SET: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_array_set(key, value);
     if (!res) {
       snprintf(msg, BUFFER_LENGTH, "SUCCESS");
@@ -212,6 +216,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_GET: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     char *val = kvstore_array_get(key);
     if (val) {
       snprintf(msg, BUFFER_LENGTH, "%s", val);
@@ -224,8 +232,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_DEL: {
-    // printf("del\n");
-
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     int res = kvstore_array_delete(key);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -238,8 +248,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_MOD: {
-    // printf("mod\n");
-
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_array_modify(key, value);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -264,7 +276,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
 
   // rbtree
   case KVS_CMD_RSET: {
-
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_rbtree_set(key, value);
     if (!res) {
       snprintf(msg, BUFFER_LENGTH, "SUCCESS");
@@ -274,7 +289,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_RGET: {
-
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     char *val = kvstore_rbtree_get(key);
     if (val) {
       snprintf(msg, BUFFER_LENGTH, "%s", val);
@@ -285,7 +303,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_RDEL: {
-
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     int res = kvstore_rbtree_delete(key);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -298,7 +319,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_RMOD: {
-
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_rbtree_modify(key, value);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -322,7 +346,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
   }
 
   case KVS_CMD_HSET: {
-
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_hash_set(key, value);
     if (!res) {
       snprintf(msg, BUFFER_LENGTH, "SUCCESS");
@@ -333,7 +360,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
   }
   // hash
   case KVS_CMD_HGET: {
-
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     char *val = kvstore_hash_get(key);
     if (val) {
       snprintf(msg, BUFFER_LENGTH, "%s", val);
@@ -344,7 +374,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_HDEL: {
-
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     int res = kvstore_hash_delete(key);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -357,7 +390,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_HMOD: {
-
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_hash_modify(key, value);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -382,6 +418,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
 
   // skip list
   case KVS_CMD_SSET: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_skiptable_set(key, value);
     if (!res) {
       snprintf(msg, BUFFER_LENGTH, "SUCCESS");
@@ -391,6 +431,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_SGET: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     char *val = kvstore_skiptable_get(key);
     if (val) {
       snprintf(msg, BUFFER_LENGTH, "%s", val);
@@ -400,6 +444,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_SDEL: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     int res = kvstore_skiptable_delete(key);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -411,6 +459,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_SMOD: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_skiptable_modify(key, value);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -433,6 +485,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
 
   // B-tree
   case KVS_CMD_BSET: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_btree_set(key, value);
     if (!res) {
       snprintf(msg, BUFFER_LENGTH, "SUCCESS");
@@ -442,6 +498,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_BGET: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     char *val = kvstore_btree_get(key);
     if (val) {
       snprintf(msg, BUFFER_LENGTH, "%s", val);
@@ -451,6 +511,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_BDEL: {
+    if (key == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key");
+      break;
+    }
     int res = kvstore_btree_delete(key);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -462,6 +526,10 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
     break;
   }
   case KVS_CMD_BMOD: {
+    if (key == NULL || value == NULL) {
+      snprintf(msg, BUFFER_LENGTH, "FAILED: missing key or value");
+      break;
+    }
     int res = kvstore_btree_modify(key, value);
     if (res < 0) { // server
       snprintf(msg, BUFFER_LENGTH, "%s", "ERROR");
@@ -553,11 +621,12 @@ int kvstore_parser_protocol(struct conn_item *item, char **tokens, int count) {
 
   default: {
     // 未知命令，返回错误消息而不是崩溃
-    printf("Unknown cmd: %s (cmd_id=%d)\n", tokens[0], cmd);
     snprintf(msg, BUFFER_LENGTH, "ERROR: unknown command '%s'", tokens[0]);
     break;
   }
   }
+
+  return 0;
 }
 
 // 处理cli的请求，按 \n 分割多条消息，逐条解析处理
@@ -571,9 +640,9 @@ int kvstore_request(struct conn_item *item) {
   memset(item->wbuffer, 0, BUFFER_LENGTH);
   int wpos = 0;
 
-  // 使用静态缓冲区避免协程栈溢出
-  static char temp_msg[512];
-  static struct conn_item temp_item;
+  // Bug fix: 不使用 static，避免协程/多线程下数据竞争
+  char temp_msg[512];
+  struct conn_item temp_item;
 
   // 按 \n 分割，逐条处理消息
   while ((newline = strchr(line_start, '\n')) != NULL) {
@@ -690,6 +759,12 @@ int init_kvengine(void) {
   int recovered = kvs_persist_recover();
   printf("[PERSISTENCE] Recovered %d entries from WAL to Hash Engine\n",
          recovered);
+
+  // Compact WAL: deduplicate entries, remove tombstones
+  // This prevents wal.log from growing unbounded across restarts
+  if (recovered > 0) {
+    wal_buffer_compact();
+  }
 #endif
 
   return 0;
@@ -718,11 +793,13 @@ int exit_kvengine(void) {
 #endif
 
 #if ENABLE_PERSISTENCE
-  // 停止后台刷盘线程
+  // 停止后台刷盘线程（内部已执行 final flush 并销毁 mutex）
   wal_flusher_stop();
-  // 确保所有数据落盘
-  wal_flusher_force_flush();
-  // 关闭 WAL 缓冲区
+  // Bug fix: 移除了 wal_flusher_force_flush()，因为：
+  // 1. wal_flusher_stop 内部线程退出前已做 final flush
+  // 2. wal_buffer_shutdown 内部也会再做一次 flush
+  // 3. stop 已销毁 flusher 的 mutex，此时调用 force_flush 可能访问已销毁资源
+  // 关闭 WAL 缓冲区（内部会 flush 残余 + fsync + close fd）
   wal_buffer_shutdown();
   // 销毁持久化层
   kvs_persist_destroy();

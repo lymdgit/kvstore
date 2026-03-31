@@ -183,5 +183,13 @@ int kvs_array_count(array_t *arr) {
   if (!arr)
     return -1;
 
-  return arr->array_idx;
+  // Bug fix: 遍历计数实际有效元素，而非返回高水位线
+  // 因为 delete 操作将 key 设为 NULL 但不减少 array_idx
+  int count = 0;
+  for (int i = 0; i < arr->array_idx && i < KVS_ARRAY_SIZE; i++) {
+    if (arr->array_table[i].key != NULL) {
+      count++;
+    }
+  }
+  return count;
 }

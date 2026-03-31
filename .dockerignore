@@ -1,0 +1,27 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts (will be rebuilt inside container)
+*.o
+kvstore
+kv_benchmark
+
+# WAL data (should not be baked into image)
+data/
+
+# Documentation & non-essential files
+compare.html
+README.md
+LICENSE
+
+# NtyCo build artifacts
+NtyCo/objs/
+NtyCo/bin/
+NtyCo/libntyco.a
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
