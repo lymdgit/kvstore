@@ -144,7 +144,7 @@ int init_server(unsigned short port) {
     return -1;
   }
 
-  listen(sockfd, 512);
+  listen(sockfd, 4096);
 
   return sockfd;
 }

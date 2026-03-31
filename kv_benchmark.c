@@ -35,13 +35,13 @@
 #define DEFAULT_DATA_SIZE 64
 
 // Histogram configuration
-// 0-200ms range with 10us resolution
-// Bucket 0: 0-9us
-// Bucket 1: 10-19us
+// 0-2000ms range with 100us resolution
+// Bucket 0: 0-99us
+// Bucket 1: 100-199us
 // ...
-// Bucket 20000: >= 200000us (200ms)
+// Bucket 20000: >= 2000000us (2000ms)
 #define HISTOGRAM_BUCKETS 20001
-#define HISTOGRAM_RESOLUTION_US 10
+#define HISTOGRAM_RESOLUTION_US 100
 
 // 存储类型
 typedef enum {
@@ -325,7 +325,7 @@ static double calculate_percentile(long *histogram, long total_samples,
              1000.0;
     }
   }
-  // Max value (200ms+)
+  // Max value (2000ms+)
   return (HISTOGRAM_BUCKETS * HISTOGRAM_RESOLUTION_US) / 1000.0;
 }
 

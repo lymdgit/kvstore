@@ -1,6 +1,6 @@
 /**
  * @file wal_buffer.c
- * @brief WAL buffer implementation with io_uring support
+ * @brief WAL buffer implementation with standard write+fsync
  */
 
 #include "wal_buffer.h"
@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <stdatomic.h>
 #include <fcntl.h>
-#include <liburing.h>
+
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,9 +34,6 @@ static struct {
 
   char data_dir[256]; // Data directory
   int wal_fd;         // WAL file descriptor
-
-  struct io_uring ring; // io_uring instance
-  int use_iouring;      // Flag to indicate if io_uring is available
 
   int initialized;
 } g_wal = {0};
@@ -93,16 +90,6 @@ int wal_buffer_init(const wal_buffer_config_t *config) {
     return -1;
   }
 
-  // Initialize io_uring
-  if (io_uring_queue_init(1024, &g_wal.ring, 0) < 0) {
-    fprintf(stderr, "Failed to initialize io_uring for WAL, falling back to "
-                    "standard syscalls\n");
-    g_wal.use_iouring = 0;
-  } else {
-    g_wal.use_iouring = 1;
-    printf("[WAL] io_uring initialized for persistence\n");
-  }
-
   g_wal.initialized = 1;
   printf("[WAL] Initialized with %zu MB buffer\n", capacity / (1024 * 1024));
 
@@ -116,12 +103,6 @@ void wal_buffer_shutdown(void) {
 
   // Flush remaining data
   wal_buffer_flush();
-
-  // Close io_uring
-  if (g_wal.use_iouring) {
-    io_uring_queue_exit(&g_wal.ring);
-    g_wal.use_iouring = 0;
-  }
 
   // Close file
   if (g_wal.wal_fd >= 0) {
@@ -144,7 +125,6 @@ void wal_buffer_shutdown(void) {
 }
 // 向内存中的buffer中追加数据
 // 如果内存满了，就先刷盘
-// 涉及到了spinlock和mutex两者的使用方式
 int wal_buffer_append(const char *key, size_t key_len, const char *value,
                       size_t value_len) {
   if (!g_wal.initialized || !key) {
@@ -162,12 +142,8 @@ int wal_buffer_append(const char *key, size_t key_len, const char *value,
   if (pending + entry_size > g_wal.capacity) {
     pthread_spin_unlock(&g_wal.spinlock);
 
-    // Buffer full - need to wait for flush
-    // In production, you'd signal the flusher and wait
-    // For now, do a blocking flush
-    pthread_mutex_lock(&g_wal.lock);
+    // Buffer full — flush serializes internally via mutex
     wal_buffer_flush();
-    pthread_mutex_unlock(&g_wal.lock);
 
     pthread_spin_lock(&g_wal.spinlock);
 
@@ -182,14 +158,12 @@ int wal_buffer_append(const char *key, size_t key_len, const char *value,
   // Append entry
   size_t write_offset = g_wal.write_pos % g_wal.capacity;
 
-  // Bug fix: 检查是否会跨越缓冲区末尾（环绕写入情况）
+  // 检查是否会跨越缓冲区末尾（环绕写入情况）
   if (write_offset + entry_size > g_wal.capacity) {
     pthread_spin_unlock(&g_wal.spinlock);
 
     // 数据会跨界，需要先刷盘使 write_pos 重置到 0
-    pthread_mutex_lock(&g_wal.lock);
     wal_buffer_flush();
-    pthread_mutex_unlock(&g_wal.lock);
 
     pthread_spin_lock(&g_wal.spinlock);
     write_offset = g_wal.write_pos % g_wal.capacity;
@@ -246,164 +220,81 @@ int wal_buffer_needs_flush(int threshold_percent) {
   return wal_buffer_fill_percent() >= threshold_percent;
 }
 
-// Internal standard write fallback
-// 标准的写操作，其实redis采用的是后台线程是每秒进行fsync一次
-// 每秒之间的数据扔到page cache中，fsyn是一个非常昂贵的IO操作
-// Bug fix: 使用循环处理 short write
-static int wal_buffer_flush_std(char *data, size_t len) {
+// Internal write (no fsync — page cache only)
+// fsync is done separately by the flusher thread (Redis AOF "everysec" strategy)
+static int wal_buffer_write_std(char *data, size_t len) {
   size_t total_written = 0;
   while (total_written < len) {
     ssize_t written = write(g_wal.wal_fd, data + total_written, len - total_written);
     if (written < 0) {
-      if (errno == EINTR) continue; // 被信号中断，重试
+      if (errno == EINTR) continue;
       perror("wal write");
       return -1;
     }
     total_written += written;
   }
-  fsync(g_wal.wal_fd);
   return (int)total_written;
 }
 
-// Internal io_uring flush
-// 1. 准备写
-// 2. 准备fsync
-// 3. 提交
-// 4. 等待完成
-// 5. 检查结果
-// 6. 推进CQ ring
-static int wal_buffer_flush_uring(char *data, size_t len) {
-  struct io_uring_sqe *sqe_write;
-  struct io_uring_sqe *sqe_fsync;
-
-  // We need 2 SQEs: Write + Fsync
-  // They must be linked so fsync executes after write
-  // 确保队列里至少有两个空位
-  if (io_uring_sq_space_left(&g_wal.ring) < 2) {
-    // Should not happen in this simplified design, but handle it
-    io_uring_submit(&g_wal.ring); // Try to clear space
-  }
-
-  // 1. Prepare Write
-  sqe_write = io_uring_get_sqe(&g_wal.ring);
-  if (!sqe_write)
-    return wal_buffer_flush_std(data, len); // Fallback
-
-  // Bug fix: 使用 lseek 获取当前文件末尾偏移，避免 O_APPEND + offset=-1 的不确定行为
-  off_t cur_offset = lseek(g_wal.wal_fd, 0, SEEK_END);
-  io_uring_prep_write(sqe_write, g_wal.wal_fd, data, len, cur_offset >= 0 ? cur_offset : 0);
-  sqe_write->flags |= IOSQE_IO_LINK; // Important: Link to next
-
-  // 2. Prepare Fsync
-  sqe_fsync = io_uring_get_sqe(&g_wal.ring);
-  if (!sqe_fsync) {
-    // Bug fix: 第一个 SQE 已经准备好了，不能直接回退到 std 写（会导致双重写入）
-    // 提交已有的 write SQE 并等待完成，然后手动 fsync
-    int submit_ret = io_uring_submit_and_wait(&g_wal.ring, 1);
-    if (submit_ret < 0) {
-      return wal_buffer_flush_std(data, len);
-    }
-    struct io_uring_cqe *fallback_cqe;
-    io_uring_wait_cqe(&g_wal.ring, &fallback_cqe);
-    int write_res = fallback_cqe->res;
-    io_uring_cqe_seen(&g_wal.ring, fallback_cqe);
-    if (write_res < 0) {
-      fprintf(stderr, "io_uring write failed in fallback: %s\n", strerror(-write_res));
-      return -1;
-    }
+// Explicit fsync — called by flusher thread and shutdown only
+void wal_buffer_fsync(void) {
+  if (g_wal.initialized && g_wal.wal_fd >= 0) {
     fsync(g_wal.wal_fd);
-    return (int)len;
   }
-
-  io_uring_prep_fsync(sqe_fsync, g_wal.wal_fd, IORING_FSYNC_DATASYNC);
-  // Default flags for last one
-
-  // 3. Submit and Wait
-  int ret = io_uring_submit_and_wait(&g_wal.ring, 2);
-  if (ret < 0) {
-    perror("io_uring_submit_and_wait");
-    return wal_buffer_flush_std(data, len);
-  }
-
-  // 4. Check CQEs
-  struct io_uring_cqe *cqe;
-  unsigned head;
-  int count = 0;
-  int io_err = 0;
-
-  io_uring_for_each_cqe(&g_wal.ring, head, cqe) {
-    if (cqe->res < 0) {
-      io_err = cqe->res;
-    }
-    count++;
-  }
-
-  // Advance CQ ring
-  // 告诉内核我看过这些通知了，CQ队列可以推进了
-  io_uring_cq_advance(&g_wal.ring, count);
-
-  if (io_err < 0) {
-    fprintf(stderr, "io_uring operation failed: %s\n", strerror(-io_err));
-    return -1;
-  }
-
-  return (int)len;
 }
-// 调用io_uring进行刷盘
-// 1. 获取未刷盘的数据量
-// 2. 计算刷盘偏移
-// 3. 调用io_uring进行刷盘
-// 4. 更新刷盘位置
-// 5. 重置位置（如果缓冲区为空）
+
+// WAL Buffer Flush: write pending data to disk
+// Thread-safe: uses mutex internally to serialize all callers
+// (flusher thread, append-triggered flush, shutdown flush)
 int wal_buffer_flush(void) {
   if (!g_wal.initialized) {
     return -1;
   }
 
+  // Serialize all flushes — prevents flusher thread and append thread
+  // from writing the same data range simultaneously
+  pthread_mutex_lock(&g_wal.lock);
+
   // 获取未刷盘的数据量
-  // 全局变量的简单读，使用spinlock
   pthread_spin_lock(&g_wal.spinlock);
   size_t write_pos = g_wal.write_pos;
   size_t flush_pos = g_wal.flush_pos;
   pthread_spin_unlock(&g_wal.spinlock);
 
   if (write_pos == flush_pos) {
+    pthread_mutex_unlock(&g_wal.lock);
     return 0; // Nothing to flush
   }
-  // pending:需要进行刷盘的大小
+
   size_t pending = write_pos - flush_pos;
-  // flush_offset:刷盘的偏移量
   size_t flush_offset = flush_pos % g_wal.capacity;
 
-  // Bug fix: 检查数据是否跨越缓冲区末尾，只刷到末尾
+  // 检查数据是否跨越缓冲区末尾，只刷到末尾
   if (flush_offset + pending > g_wal.capacity) {
     pending = g_wal.capacity - flush_offset;
   }
 
-  // Actual Flush Logic
-  int written = 0;
-  if (g_wal.use_iouring) {
-    written = wal_buffer_flush_uring(g_wal.data + flush_offset, pending);
-  } else {
-    written = wal_buffer_flush_std(g_wal.data + flush_offset, pending);
-  }
+  // Write to page cache (fast, no fsync)
+  // fsync is handled by the background flusher thread every second
+  int written = wal_buffer_write_std(g_wal.data + flush_offset, pending);
 
   if (written < 0) {
+    pthread_mutex_unlock(&g_wal.lock);
     return -1;
   }
 
-  // Update flush position
-  // 刷盘成功，更新刷盘位置
+  // Update flush position by actual bytes written
   pthread_spin_lock(&g_wal.spinlock);
-  g_wal.flush_pos = write_pos;
+  g_wal.flush_pos += written;
 
-  // Reset positions if buffer is empty (avoid overflow)
-  // 如果缓冲区为空，重置位置（避免溢出）
+  // Reset positions if buffer is fully flushed
   if (g_wal.flush_pos == g_wal.write_pos) {
     g_wal.flush_pos = 0;
     g_wal.write_pos = 0;
   }
   pthread_spin_unlock(&g_wal.spinlock);
+
+  pthread_mutex_unlock(&g_wal.lock);
 
   return written;
 }

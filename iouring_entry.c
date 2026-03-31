@@ -18,7 +18,8 @@
 // ============================================================================
 // Configuration
 // ============================================================================
-#define IOURING_ENTRIES 4096      // 更大的 SQ/CQ ring，避免高并发下溢出
+#define IOURING_ENTRIES 16384     // SQ ring size: 支撑 4000+ 并发连接
+#define CQE_BATCH_SUBMIT_INTERVAL 256  // 每处理 256 个 CQE 做一次中间 submit
 #define IOURING_PORT_COUNT 20
 #define IOURING_BASE_PORT 2048
 
@@ -87,7 +88,7 @@ int uring_init_server(unsigned short port) {
     return -1;
   }
 
-  listen(sockfd, 512);
+  listen(sockfd, 4096);
 
   return sockfd;
 }
@@ -316,7 +317,7 @@ int iouring_entry(void) {
 
   printf("[io_uring] Event loop started\n");
 
-  // Main event loop with batch CQE processing
+  // Main event loop
   while (1) {
 
     struct io_uring_cqe *cqe;
@@ -330,7 +331,9 @@ int iouring_entry(void) {
       continue;
     }
 
-    // Batch process all available CQEs (key optimization!)
+    // Process all available CQEs in one pass
+    // Periodically call io_uring_submit() to push accumulated SQEs to kernel
+    // so new read/write operations can start while we handle remaining CQEs
     io_uring_for_each_cqe(&ring, head, cqe) {
 
       struct conn_item *item = (struct conn_item *)io_uring_cqe_get_data(cqe);
@@ -346,7 +349,6 @@ int iouring_entry(void) {
       switch (event_type) {
 
       case EVENT_TYPE_ACCEPT: {
-        // Find accept_idx from item pointer
         int accept_idx = (int)(item - uring_accept_conns);
         handle_accept_completion(accept_idx, res);
         break;
@@ -364,15 +366,19 @@ int iouring_entry(void) {
       }
 
       cqe_count++;
+
+      // Flush accumulated SQEs to kernel every N CQEs
+      // This lets new I/O ops start executing while we continue processing
+      // No break needed — io_uring_submit() only touches the SQ ring
+      if (cqe_count % CQE_BATCH_SUBMIT_INTERVAL == 0) {
+        io_uring_submit(&ring);
+      }
     }
 
-    // Advance CQ ring in one batch (more efficient than per-event cqe_seen)
+    // Advance CQ ring (tell kernel we consumed these CQEs)
     io_uring_cq_advance(&ring, cqe_count);
 
-    // Submit new SQEs to kernel
-    // IMPORTANT: io_uring_submit() must always be called to update SQ tail
-    // pointer! In SQPOLL mode, liburing internally avoids syscall unless
-    // NEED_WAKEUP is set.
+    // Final submit for any remaining SQEs
     io_uring_submit(&ring);
   }
 
