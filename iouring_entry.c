@@ -18,8 +18,8 @@
 // ============================================================================
 // Configuration
 // ============================================================================
-#define IOURING_ENTRIES 16384     // SQ ring size: 支撑 4000+ 并发连接
-#define CQE_BATCH_SUBMIT_INTERVAL 256  // 每处理 256 个 CQE 做一次中间 submit
+#define IOURING_ENTRIES 16384         // SQ ring size: 支撑 4000+ 并发连接
+#define CQE_BATCH_SUBMIT_INTERVAL 256 // 每处理 256 个 CQE 做一次中间 submit
 #define IOURING_PORT_COUNT 20
 #define IOURING_BASE_PORT 2048
 
@@ -45,9 +45,11 @@ enum {
 struct io_uring ring;
 
 // Connection management - pre-allocated to avoid malloc per request
+// 这个负责具体的读写事件
 struct conn_item uring_connlist[1048576] = {0};
 
 // Special conn_item entries for accept events (one per listen socket)
+// 这个负责accept事件
 struct conn_item uring_accept_conns[IOURING_PORT_COUNT] = {0};
 
 // Time statistics
@@ -128,7 +130,8 @@ int add_read_request(int clientfd) {
     io_uring_submit(&ring);
     sqe = io_uring_get_sqe(&ring);
     if (!sqe) {
-      fprintf(stderr, "[iouring] SQ ring full, drop read for fd=%d\n", clientfd);
+      fprintf(stderr, "[iouring] SQ ring full, drop read for fd=%d\n",
+              clientfd);
       close(clientfd);
       uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
       return -1;
@@ -158,7 +161,8 @@ int add_write_request(int clientfd) {
     io_uring_submit(&ring);
     sqe = io_uring_get_sqe(&ring);
     if (!sqe) {
-      fprintf(stderr, "[iouring] SQ ring full, drop write for fd=%d\n", clientfd);
+      fprintf(stderr, "[iouring] SQ ring full, drop write for fd=%d\n",
+              clientfd);
       close(clientfd);
       uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
       return -1;
@@ -196,11 +200,8 @@ int handle_accept_completion(int accept_idx, int clientfd) {
   // Bug fix: 使用独立的 client_addr，避免并发覆盖
   int sockfd = uring_accept_conns[accept_idx].fd;
   accept_client_lens[accept_idx] = sizeof(accept_client_addrs[accept_idx]);
-  add_accept_request(sockfd, accept_idx,
-                     &accept_client_addrs[accept_idx],
+  add_accept_request(sockfd, accept_idx, &accept_client_addrs[accept_idx],
                      &accept_client_lens[accept_idx]);
-
-
 
   return 0;
 }
@@ -214,6 +215,7 @@ int handle_read_completion(int clientfd, int bytes_read) {
   }
 
   if (bytes_read <= 0) {
+    // 内核在处理这个fd的时候发现已经没了，所以就会返回res = -105
     if (bytes_read == -ECANCELED) {
       // 连接已关闭后内核取消了挂起的 read，正常现象，静默处理
       return -1;
@@ -227,10 +229,10 @@ int handle_read_completion(int clientfd, int bytes_read) {
   uring_connlist[clientfd].rlen = bytes_read;
   uring_connlist[clientfd].rbuffer[bytes_read] = '\0';
 
-  // Process kvstore request
+  // 处理请求
   kvstore_request(&uring_connlist[clientfd]);
 
-  // Add write request
+  // 可读--> 可写
   add_write_request(clientfd);
 
   return 0;
@@ -243,19 +245,20 @@ int handle_write_completion(int clientfd, int bytes_written) {
   if (uring_connlist[clientfd].fd == FD_CLOSED_FLAG) {
     return -1;
   }
-
+  // res返回值小于0，说明写失败了
   if (bytes_written < 0) {
+    // 内核在处理这个fd的时候发现已经没了，所以就会返回res = -105
     if (bytes_written == -ECANCELED) {
-      // 连接关闭后内核取消了挂起的 write，静默处理
       uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
       return -1;
     }
+    // 如果是因为网络问题导致写失败了，关闭连接
     close(clientfd);
     uring_connlist[clientfd].fd = FD_CLOSED_FLAG;
     return -1;
   }
 
-  // Continue reading after write completes
+  // 写事件执行完了，设置为检测读事件，为下一次接收数据做准备
   add_read_request(clientfd);
 
   return 0;
@@ -307,7 +310,8 @@ int iouring_entry(void) {
     printf("listen port: %d\n", IOURING_BASE_PORT + i);
     // Bug fix: 使用独立的 client_addr
     accept_client_lens[i] = sizeof(accept_client_addrs[i]);
-    add_accept_request(sockfd, i, &accept_client_addrs[i], &accept_client_lens[i]);
+    add_accept_request(sockfd, i, &accept_client_addrs[i],
+                       &accept_client_lens[i]);
   }
 
   // Initial submit (only needed once, SQPOLL takes over after this)
@@ -325,6 +329,7 @@ int iouring_entry(void) {
     int cqe_count = 0;
 
     // Wait for at least one completion event
+    // 这里会阻塞式等待：如果CQ中没有事件，就会阻塞
     int ret = io_uring_wait_cqe(&ring, &cqe);
     if (ret < 0) {
       perror("io_uring_wait_cqe");
@@ -334,6 +339,7 @@ int iouring_entry(void) {
     // Process all available CQEs in one pass
     // Periodically call io_uring_submit() to push accumulated SQEs to kernel
     // so new read/write operations can start while we handle remaining CQEs
+    // 在liburing.h中，定义了io_uring_for_each_cqe宏，里面是for循环，简化我们的判断CQ是否为空
     io_uring_for_each_cqe(&ring, head, cqe) {
 
       struct conn_item *item = (struct conn_item *)io_uring_cqe_get_data(cqe);
@@ -342,23 +348,28 @@ int iouring_entry(void) {
         continue;
       }
 
+      // 获取返回值和事件类型
+      // 对于accept事件，返回值是accept返回的sockfd
+      // 对于read事件，返回值是read返回的字节数
+      // 对于write事件，返回值是write返回的字节数
       int res = cqe->res;
       int event_type = item->uring_event_type;
 
-      // Dispatch based on event type
+      // 根据事件类型分发到不同的处理函数
       switch (event_type) {
-
+      // accept事件
       case EVENT_TYPE_ACCEPT: {
+        // 计算accept事件在uring_accept_conns中的索引
         int accept_idx = (int)(item - uring_accept_conns);
         handle_accept_completion(accept_idx, res);
         break;
       }
-
+      // read事件
       case EVENT_TYPE_READ: {
-        handle_read_completion(item->fd, res);
+        handle_read_completion(item->fd, res); // 这里直接去解析指令了
         break;
       }
-
+      // write事件
       case EVENT_TYPE_WRITE: {
         handle_write_completion(item->fd, res);
         break;

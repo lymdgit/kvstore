@@ -1,10 +1,5 @@
 # KVStore - 高性能键值存储系统
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Language](https://img.shields.io/badge/language-C-orange.svg)]()
-[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)]()
-[![Docker](https://img.shields.io/badge/docker-supported-blue.svg)]()
-
 ## 项目简介
 
 KVStore 是一个高性能、多存储引擎的网络键值存储系统，使用纯 C 语言实现。支持 **5 种数据结构**作为底层存储引擎，**3 种网络 I/O 模型**，以及基于 **WAL (Write-Ahead Logging)** 的异步持久化机制，并提供 Docker 容器化部署方案。
@@ -67,26 +62,6 @@ KVStore 是一个高性能、多存储引擎的网络键值存储系统，使用
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-## WAL 持久化设计
-
-采用类似 Redis AOF 的 **Write-Ahead Logging (WAL)** 机制实现数据持久化，刷盘策略为 **everysec（每秒 fsync 一次）**：
-
-### 核心流程
-
-1. **写入请求到达** → 数据先追加到内存中的 WAL Buffer（16MB 环形缓冲区）
-2. **Buffer 满时** → 仅 `write()` 到 Page Cache（微秒级），不阻塞事件循环
-3. **后台线程刷盘** → 每隔 1 秒由 `wal_flusher` 线程执行 `write()` + `fsync()`，保证持久化
-4. **崩溃恢复** → 重启时通过 `wal_buffer_replay` 回放日志，重建内存数据
-5. **WAL Compaction** → 回放完成后自动去重压缩，每个 key 只保留最新值，移除已删除的 tombstone 记录
-
-### 关键技术点
-
-- **Spinlock + Mutex 混合锁**：热路径（内存 append）用 Spinlock，冷路径（磁盘 flush）用 Mutex 序列化
-- **环形缓冲区**：绝对位置计数 + 取余运算，flush 按 `+=written` 推进（非跳跃），正确处理 wrap-around
-- **线程安全 flush**：`wal_buffer_flush()` 内部持有 Mutex，无论从 flusher 线程还是 append 触发都自动序列化，避免竞态
-- **Everysec 策略**：事件循环中 buffer 满触发的 flush 只做 `write()`（Page Cache），fsync 由后台线程每秒执行，避免阻塞网络 I/O
-- **原子替换**：Compaction 使用 write-to-temp + rename 策略，保证崩溃安全
 
 ## 高并发优化
 
